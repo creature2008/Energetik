@@ -1,41 +1,32 @@
-﻿import { Project, Component } from '../types';
+﻿import { Project } from '../types';
 import { buildNetlist } from '../netlist';
 import { solveMna, MnaElement } from './mna';
 
 export type SimulationResult = {
-  /** netId -> напряжение (В) */
   netVoltages: Map<string, number>;
-  /** compId -> { pinId -> напряжение на клемме } */
   pinVoltages: Map<string, Map<string, number>>;
-  /** провод id -> ток (А) */
   wireCurrents: Map<string, number>;
-  /** События: КЗ, перегруз, срабатывание */
   events: SimEvent[];
 };
 
 export type SimEvent = {
-  type: 'short-circuit' | 'overload' | 'tripped' | 'burnt';
+  type: 'short-circuit' | 'overload' | 'tripped' | 'burnt' | 'info';
   message: string;
   target?: { compId?: string; wireId?: string };
 };
 
 /**
  * Упрощённая симуляция линейной цепи.
- * Пока поддерживает: источник питания (глобальный), лампу как резистор.
- * Автоматы, реле, двигатели — следующим шагом.
+ * Поддерживает: источник питания (глобальный), лампу, выключатель, автомат.
+ * Автоматы срабатывают по току (порог = params.ratedCurrent).
  */
 export function runSimulation(project: Project): SimulationResult {
   const nets = buildNetlist(project);
-
-  // Индекс netId -> номер узла (0..n-1). Земля не входит, добавим её отдельно.
   const netIndex = new Map<string, number>();
   nets.forEach((net, i) => netIndex.set(net.id, i));
 
-  // Земля — виртуальный узел с индексом nets.length
-  const groundIndex = nets.length;
-  const totalNodes = nets.length; // nodeCount (без земли) — solveMna сам добавит землю
+  const totalNodes = nets.length;
 
-  // Построим карту: (compId, pinId) -> netId
   const pinToNet = new Map<string, string>();
   for (const net of nets) {
     for (const pin of net.pins) {
@@ -48,11 +39,11 @@ export function runSimulation(project: Project): SimulationResult {
   }
 
   const elements: MnaElement[] = [];
+  const events: SimEvent[] = [];
+  // Метаданные об элементах, чтобы потом сопоставить токи с компонентами
+  const resistorMeta: { compId: string; kind: 'lamp' | 'wire' | 'switch-on' | 'breaker-on' }[] = [];
 
-  // ---- Источник питания (глобальный, по настройкам проекта) ----
-  // Пока считаем, что у нас два «глобальных» узла: L и N (фаза и ноль).
-  // Они определяются специальным виртуальным компонентом с id = '__supply__'.
-  // Клеммы: 'L' — фаза, 'N' — ноль (или PE — позже).
+  // ---- Источник питания (глобальный) ----
   const supplyNetL = getNet('__supply__', 'L');
   const supplyNetN = getNet('__supply__', 'N');
 
@@ -71,6 +62,8 @@ export function runSimulation(project: Project): SimulationResult {
 
   // ---- Компоненты ----
   for (const comp of project.components) {
+    if (comp.id === '__supply__') continue;
+
     if (comp.deviceId === 'lamp') {
       const power = Number(comp.params.power) || 60;
       const voltage = Number(comp.params.voltage) || 220;
@@ -85,22 +78,56 @@ export function runSimulation(project: Project): SimulationResult {
           nodeB: netIndex.get(netB)!,
           resistance: R
         });
+        resistorMeta.push({ compId: comp.id, kind: 'lamp' });
       }
     }
-    // TODO: switch (выключатель), автомат, розетка, клеммник — далее
+
+    if (comp.deviceId === 'switch') {
+      // Выключатель: если params.closed === true — проводимость 0.001 (почти 0 Ом, но не 0)
+      const closed = comp.params.closed === true;
+      if (closed) {
+        const netA = getNet(comp.id, '1');
+        const netB = getNet(comp.id, '2');
+        if (netA && netB) {
+          elements.push({
+            type: 'resistor',
+            nodeA: netIndex.get(netA)!,
+            nodeB: netIndex.get(netB)!,
+            resistance: 0.001
+          });
+          resistorMeta.push({ compId: comp.id, kind: 'switch-on' });
+        }
+      }
+      // Если разомкнут — вообще не добавляем в цепь (разрыв).
+    }
+
+    if (comp.deviceId === 'breaker') {
+      // Автомат: если params.tripped === true — разомкнут. Иначе — как провод (0.001).
+      const tripped = comp.params.tripped === true;
+      if (!tripped) {
+        const netA = getNet(comp.id, '1');
+        const netB = getNet(comp.id, '2');
+        if (netA && netB) {
+          elements.push({
+            type: 'resistor',
+            nodeA: netIndex.get(netA)!,
+            nodeB: netIndex.get(netB)!,
+            resistance: 0.001
+          });
+          resistorMeta.push({ compId: comp.id, kind: 'breaker-on' });
+        }
+      }
+    }
   }
 
   // ---- Решаем ----
   const result = solveMna(totalNodes, elements);
 
-  // ---- Разворачиваем обратно в netVoltages ----
   const netVoltages = new Map<string, number>();
   for (const net of nets) {
-    const idx = netIndex.get(net.id)!;
-    netVoltages.set(net.id, result.voltages[idx] ?? 0);
+    netVoltages.set(net.id, result.voltages[netIndex.get(net.id)!] ?? 0);
   }
 
-  // ---- Напряжения на клеммах ----
   const pinVoltages = new Map<string, Map<string, number>>();
   for (const comp of project.components) {
     const map = new Map<string, number>();
@@ -111,17 +138,39 @@ export function runSimulation(project: Project): SimulationResult {
     pinVoltages.set(comp.id, map);
   }
 
-  // ---- Токи в проводах ----
-  // Пока упрощённо: ток провода = ток через нагрузку, к которой он подключён.
-  // В полноценной версии — ток через элемент MNA, соответствующий проводу.
-  const wireCurrents = new Map<string, number>();
+  // ---- Проверка автоматов ----
+  // Для каждого автомата: если ток через него превышает ratedCurrent — событие tripped.
+  const breakerCurrents = new Map<string, number>();
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    const meta = resistorMeta[i];
+    if (!meta) continue;
+    if (meta.kind === 'breaker-on') {
+      const current = Math.abs(result.currents[i] ?? 0);
+      breakerCurrents.set(meta.compId, current);
+    }
+  }
 
-  const events: SimEvent[] = [];
+  for (const comp of project.components) {
+    if (comp.deviceId === 'breaker') {
+      const rated = Number(comp.params.ratedCurrent) || 16;
+      const current = breakerCurrents.get(comp.id) ?? 0;
+      if (current > rated * 1.2) {
+        // Превышение на 20% — считаем «сработал»
+        events.push({
+          type: 'tripped',
+          message: "Автомат " + comp.id + " сработал: ток " + current.toFixed(2) + "А > номинал " + rated + "А",
+          target: { compId: comp.id }
+        });
+      }
+    }
+  }
 
   return {
     netVoltages,
     pinVoltages,
-    wireCurrents,
+    wireCurrents: new Map(),
     events
   };
 }
+
