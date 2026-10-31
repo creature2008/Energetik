@@ -1,4 +1,4 @@
-﻿import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { solveMna, MnaElement } from '../src/sim/mna';
 
 describe('MNA solver', () => {

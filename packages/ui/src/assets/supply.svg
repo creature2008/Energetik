@@ -1,0 +1,5 @@
+﻿<svg width="80" height="60" viewBox="0 0 80 60" xmlns="http://www.w3.org/2000/svg">
+  <rect x="10" y="5" width="60" height="50" rx="4" fill="#2c3e50" stroke="#1a252f" stroke-width="2"/>
+  <path d="M 40 10 L 45 25 L 40 25 L 42 35 L 35 20 L 40 20 Z" fill="#f1c40f"/>
+  <text x="40" y="52" font-size="8" text-anchor="middle" fill="#bdc3c7" font-family="sans-serif">220V</text>
+</svg>

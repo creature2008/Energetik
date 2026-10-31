@@ -1,4 +1,4 @@
-﻿import { Project, Net } from './types';
+import { Project, Net } from './types';
 
 export function buildNetlist(project: Project): Net[] {
   const parent = new Map<string, string>();

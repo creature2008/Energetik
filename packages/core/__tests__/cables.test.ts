@@ -1,4 +1,4 @@
-﻿import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { runSimulation } from '../src/sim/simulator';
 import { Project, Component } from '../src/types';
 

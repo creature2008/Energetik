@@ -1,4 +1,4 @@
-﻿export type CableMaterial = 'copper' | 'aluminum';
+export type CableMaterial = 'copper' | 'aluminum';
 export type CableType = 'solid' | 'stranded';
 
 export type CableInfo = {

@@ -1,4 +1,4 @@
-﻿import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { buildNetlist } from '../src/netlist';
 import { Project } from '../src/types';
 
