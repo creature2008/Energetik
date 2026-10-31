@@ -37,7 +37,6 @@ export function runSimulation(project: Project): SimulationResult {
   const events: SimEvent[] = [];
   const resistorMeta: { compId: string; kind: 'lamp' | 'switch-on' | 'breaker-on' }[] = [];
 
-  // ---- Источник питания ----
   const supplyNetL = getNet('__supply__', 'L');
   const supplyNetN = getNet('__supply__', 'N');
 
@@ -53,7 +52,6 @@ export function runSimulation(project: Project): SimulationResult {
     });
   }
 
-  // ---- Компоненты ----
   for (const comp of project.components) {
     if (comp.id === '__supply__') continue;
 
@@ -88,7 +86,6 @@ export function runSimulation(project: Project): SimulationResult {
     }
   }
 
-  // ---- Решаем MNA ----
   const result = solveMna(totalNodes, elements);
 
   const netVoltages = new Map<string, number>();
@@ -104,7 +101,6 @@ export function runSimulation(project: Project): SimulationResult {
     pinVoltages.set(comp.id, map);
   }
 
-  // ---- Токи нагрузок (через лампы) ----
   const componentCurrents = new Map<string, number>();
   for (let i = 0; i < elements.length; i++) {
     const meta = resistorMeta[i];
@@ -113,22 +109,6 @@ export function runSimulation(project: Project): SimulationResult {
     }
   }
 
-  // ============================================================
-  // Расчёт токов в проводах
-  // ============================================================
-  // Узлы: каждая клемма (compId:pinId) — отдельная «точка».
-  // Ребра: провода (сопротивление = 0, идеальный).
-  // Компоненты, через которые проходит ток без потерь (замкнутый выключатель,
-  // невыбитый автомат, клеммник, шина) — тоже ребра, соединяющие свои клеммы.
-  //
-  // Нагрузки (лампы, двигатели) — источник тока: их ток вытекает из L-клеммы
-  // и втекает в N-клемму.
-  // Источник питания — сток: его клеммы supply.L и supply.N.
-  //
-  // Задача: для каждой нагрузки найти путь к supply.L (для L-клеммы) и
-  // к supply.N (для N-клеммы), добавить ток I нагрузки каждому проводу на пути.
-
-  // Граф по клеммам
   type Edge = { wireId?: string; toNode: string };
   const graph = new Map<string, Edge[]>();
 
@@ -139,7 +119,6 @@ export function runSimulation(project: Project): SimulationResult {
     graph.get(to)!.push({ wireId, toNode: from });
   }
 
-  // Провода как ребра между клеммами
   for (const w of project.wires) {
     const a = w.from.compId + ':' + w.from.pinId;
     const b = w.to.compId + ':' + w.to.pinId;
@@ -147,18 +126,15 @@ export function runSimulation(project: Project): SimulationResult {
     addEdge(a, b, w.id);
   }
 
-  // Компоненты, пропускающие ток (замкнутые выключатели, автоматы, клеммники, шины)
   for (const comp of project.components) {
     if (comp.deviceId === 'switch' && comp.params.closed === true) {
-      addEdge(comp.id + ':1', comp.id + ':2'); // без wireId (внутри компонента)
+      addEdge(comp.id + ':1', comp.id + ':2');
     }
     if (comp.deviceId === 'breaker' && comp.params.tripped !== true) {
       addEdge(comp.id + ':1', comp.id + ':2');
     }
-    // TODO: клеммник, шина, реле, контактор
   }
 
-  // BFS: путь от start до end
   function findPath(start: string, end: string): string[] | null {
     if (start === end) return [];
     const visited = new Set<string>([start]);
@@ -182,25 +158,18 @@ export function runSimulation(project: Project): SimulationResult {
     wireCurrents.set(wireId, (wireCurrents.get(wireId) || 0) + current);
   }
 
-  // Для каждой лампы: путь от lamp.L до supply.L и от lamp.N до supply.N
   for (const comp of project.components) {
     if (comp.deviceId !== 'lamp') continue;
     const current = componentCurrents.get(comp.id);
     if (!current || current < 1e-9) continue;
 
-    const lampL = comp.id + ':L';
-    const lampN = comp.id + ':N';
-    const supplyL = '__supply__:L';
-    const supplyN = '__supply__:N';
-
-    const pathL = findPath(lampL, supplyL);
+    const pathL = findPath(comp.id + ':L', '__supply__:L');
     if (pathL) for (const wid of pathL) addWireCurrent(wid, current);
 
-    const pathN = findPath(lampN, supplyN);
+    const pathN = findPath(comp.id + ':N', '__supply__:N');
     if (pathN) for (const wid of pathN) addWireCurrent(wid, current);
   }
 
-  // ---- Проверка проводов по ПУЭ ----
   for (const w of project.wires) {
     const current = wireCurrents.get(w.id) || 0;
     const material: CableMaterial = (w as any).material === 'aluminum' ? 'aluminum' : 'copper';
@@ -214,7 +183,6 @@ export function runSimulation(project: Project): SimulationResult {
     }
   }
 
-  // ---- Проверка автоматов ----
   const breakerCurrents = new Map<string, number>();
   for (let i = 0; i < elements.length; i++) {
     const meta = resistorMeta[i];
@@ -227,10 +195,13 @@ export function runSimulation(project: Project): SimulationResult {
     if (comp.deviceId === 'breaker') {
       const rated = Number(comp.params.ratedCurrent) || 16;
       const current = breakerCurrents.get(comp.id) ?? 0;
-      if (current > rated * 1.2) {
+      
+      if (current > rated) {
+        const isShortCircuit = current > 1000;
         events.push({
-          type: 'tripped',
-          message: 'Автомат ' + comp.id + ' сработал: ток ' + current.toFixed(2) + 'А > номинал ' + rated + 'А',
+          type: isShortCircuit ? 'short-circuit' : 'tripped',
+          message: 'Автомат ' + comp.id + ' сработал: ток ' + current.toFixed(2) + 'А ' + 
+                   (isShortCircuit ? '(КЗ!)' : '> номинал ' + rated + 'А'),
           target: { compId: comp.id }
         });
       }
