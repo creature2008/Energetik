@@ -1,14 +1,16 @@
-﻿import React, { useState } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { Stage, Layer, Rect, Group, Circle, Line, Image as KonvaImage } from 'react-konva';
 import { runSimulation } from '@electro/core';
 import { useStore, buildProjectForSimulation } from './store';
 import useImage from 'use-image';
 
 const GRID_SIZE = 10;
+
 const DeviceImage = ({ src, x, y, width, height }: any) => {
   const [img] = useImage(src);
   return <KonvaImage image={img} x={x} y={y} width={width} height={height} />;
 };
+
 const snap = (val: number) => Math.round(val / GRID_SIZE) * GRID_SIZE;
 
 function App() {
@@ -17,6 +19,7 @@ function App() {
   const [wireMenuPos, setWireMenuPos] = useState<{x: number, y: number} | null>(null);
   const [selectedCompId, setSelectedCompId] = useState<string | null>(null);
   const [simResult, setSimResult] = useState<any>(null);
+  const [isPaused, setIsPaused] = useState(false);
 
   const { components, wires, addComponent, updatePosition, activePin, setActivePin, addWire, removeWire, updateComponentParam, insertWaypoint, updateWaypoint, removeWaypoint, setWireColor } = useStore();
 
@@ -44,6 +47,7 @@ function App() {
     if (deviceId === 'lamp') return new URL('./assets/lamp.svg', import.meta.url).href;
     if (deviceId === 'breaker') return new URL('./assets/breaker.svg', import.meta.url).href;
     if (deviceId === 'supply') return new URL('./assets/supply.svg', import.meta.url).href;
+    if (deviceId === 'switch') return new URL('./assets/switch.svg', import.meta.url).href;
     return null;
   };
 
@@ -61,18 +65,30 @@ function App() {
     const project = buildProjectForSimulation();
     const result = runSimulation(project as any);
     setSimResult(result);
+  };
 
-    const newLogs: string[] = ['[Симуляция] Запуск...'];
-    project.components.forEach((comp: any) => {
-      if (comp.deviceId === 'lamp') {
-        const vL = result.pinVoltages.get(comp.id)?.get('L') || 0;
-        const vN = result.pinVoltages.get(comp.id)?.get('N') || 0;
-        newLogs.push('[Симуляция] Лампа: L=' + vL.toFixed(1) + 'В, N=' + vN.toFixed(1) + 'В, Разница=' + Math.abs(vL - vN).toFixed(1) + 'В');
-      }
-    });
-    if (result.events.length > 0) result.events.forEach((e: any) => newLogs.push('[ОШИБКА] ' + e.message));
-    else newLogs.push('[Симуляция] Ошибок нет.');
-    setLogs(prev => [...prev, ...newLogs]);
+  // АВТОСИМУЛЯЦИЯ
+  useEffect(() => {
+    if (!isPaused) handleRunSimulation();
+  }, [components, wires, isPaused]);
+
+  // Функция отрисовки сетки (видимая область)
+  const renderGrid = (width: number, height: number, scaleX: number, x: number, y: number) => {
+    const lines = [];
+    const startX = -x / scaleX;
+    const endX = (width - x) / scaleX;
+    const startY = -y / scaleX;
+    const endY = (height - y) / scaleX;
+
+    // Вертикальные
+    for (let i = Math.floor(startX / GRID_SIZE) * GRID_SIZE; i < endX; i += GRID_SIZE) {
+      lines.push(<Line key={'v'+i} points={[i, startY, i, endY]} stroke="#333" strokeWidth={1 / scaleX} />);
+    }
+    // Горизонтальные
+    for (let i = Math.floor(startY / GRID_SIZE) * GRID_SIZE; i < endY; i += GRID_SIZE) {
+      lines.push(<Line key={'h'+i} points={[startX, i, endX, i]} stroke="#333" strokeWidth={1 / scaleX} />);
+    }
+    return lines;
   };
 
   return (
@@ -83,11 +99,21 @@ function App() {
           <button className="device-btn" onClick={() => handleAdd('supply')} style={{ background: '#900' }}>⚡ Источник 220В</button>
           <button className="device-btn" onClick={() => handleAdd('lamp')}>💡 Лампа</button>
           <button className="device-btn" onClick={() => handleAdd('breaker')}>🛑 Автомат</button>
-          <button className="device-btn" onClick={handleRunSimulation} style={{ background: '#0055aa', marginTop: '20px', fontWeight: 'bold' }}>▶ ЗАПУСТИТЬ</button>
+          <button className="device-btn" onClick={() => handleAdd('switch')}>🔘 Выключатель</button>
+          
+          <button className="device-btn" onClick={() => setIsPaused(!isPaused)} style={{ background: isPaused ? '#cc7000' : '#0055aa', marginTop: '20px', fontWeight: 'bold' }}>
+            {isPaused ? '▶ Продолжить' : '⏸ Пауза'}
+          </button>
         </div>
         
         <div className="canvas-area" onClick={() => { setWireMenuPos(null); setSelectedCompId(null); }}>
-          <Stage width={window.innerWidth - 250} height={window.innerHeight - 180} draggable
+          <Stage 
+            width={window.innerWidth - 250} 
+            height={window.innerHeight - 180}
+            draggable
+            onDragEnd={(e) => {
+              // Обновляем только позицию сцены, ничего больше
+            }}
             onWheel={(e) => {
               e.evt.preventDefault();
               const stage = e.target.getStage();
@@ -102,12 +128,8 @@ function App() {
             }}
           >
             <Layer>
-              {Array.from({ length: Math.ceil((window.innerWidth - 250) / GRID_SIZE) }).map((_, i) => (
-                <Line key={'v'+i} points={[i*GRID_SIZE, 0, i*GRID_SIZE, window.innerHeight]} stroke="#3d3d3d" strokeWidth={1} />
-              ))}
-              {Array.from({ length: Math.ceil(window.innerHeight / GRID_SIZE) }).map((_, i) => (
-                <Line key={'h'+i} points={[0, i*GRID_SIZE, window.innerWidth, i*GRID_SIZE]} stroke="#3d3d3d" strokeWidth={1} />
-              ))}
+              {/* Сетка */}
+              {renderGrid(window.innerWidth - 250, window.innerHeight - 180, 1, 0, 0)}
 
               {wires.map(wire => {
                 const pts = getWirePointsArray(wire);
@@ -116,10 +138,7 @@ function App() {
                 return (
                   <Group key={wire.id}>
                     <Line points={flat} stroke={wire.color || '#3498db'} strokeWidth={5} lineCap="round" lineJoin="round" hitStrokeWidth={20}
-                      onContextMenu={(e) => {
-                        e.evt.preventDefault(); e.cancelBubble = true;
-                        setSelectedWireId(wire.id); setWireMenuPos({ x: e.evt.clientX - 250, y: e.evt.clientY - 50 }); setSelectedCompId(null);
-                      }}
+                      onContextMenu={(e) => { e.evt.preventDefault(); e.cancelBubble = true; setSelectedWireId(wire.id); setWireMenuPos({ x: e.evt.clientX - 250, y: e.evt.clientY - 50 }); setSelectedCompId(null); }}
                     />
                     {wire.waypoints.map((wp: any, i: number) => (
                       <Circle key={i} x={wp.x} y={wp.y} radius={5} fill="#f1c40f" stroke="#000" draggable
@@ -139,14 +158,19 @@ function App() {
                 const diff = Math.abs(vL - vN);
                 const isLampOn = comp.deviceId === 'lamp' && diff > 50;
                 const lampOpacity = comp.deviceId === 'lamp' ? Math.min(diff / 220, 1) * 0.6 : 0;
+                const isTripped = simResult?.events.find((e: any) => e.type === 'tripped' && e.target?.compId === comp.id);
 
                 return (
                   <Group key={comp.id} x={comp.x} y={comp.y} draggable
                     onClick={(e) => { e.cancelBubble = true; setSelectedCompId(comp.id); setWireMenuPos(null); }}
                     onDragMove={(e) => { e.target.x(snap(e.target.x())); e.target.y(snap(e.target.y())); }}
-                    onDragEnd={(e) => updatePosition(comp.id, e.target.x(), e.target.y())}
+                    onDragEnd={(e) => {
+                      e.cancelBubble = true; // Останавливаем всплытие, чтобы камера не двигалась
+                      updatePosition(comp.id, e.target.x(), e.target.y());
+                    }}
                   >
                     {isLampOn && <Circle x={40} y={30} radius={50} fill="yellow" opacity={lampOpacity} />}
+                    {isTripped && <Rect width={80} height={60} fill="red" opacity={0.5} cornerRadius={4} />}
                     {imgSrc ? <DeviceImage src={imgSrc} x={0} y={0} width={80} height={60} /> : <Rect width={80} height={60} fill="#2a6" />}
                     <Circle x={0} y={30} radius={8} fill={activePin?.compId === comp.id && activePin?.pinId === 'L' ? '#f1c40f' : '#00ff00'} stroke="#000" onClick={(e) => handlePinClick(comp.id, 'L', e)} />
                     <Circle x={80} y={30} radius={8} fill={activePin?.compId === comp.id && activePin?.pinId === 'N' ? '#f1c40f' : '#0000ff'} stroke="#000" onClick={(e) => handlePinClick(comp.id, 'N', e)} />
@@ -178,11 +202,7 @@ function App() {
                   <div>
                     <label style={{ fontSize: '12px', display: 'block', marginBottom: '5px' }}>Номинал (А):</label>
                     <select value={comp.params.ratedCurrent} onChange={(e) => updateComponentParam(comp.id, 'ratedCurrent', Number(e.target.value))} style={{ width: '100%', padding: '5px', background: '#333', color: '#fff', border: '1px solid #555' }}>
-                      <option value={6}>6 А</option>
-                      <option value={10}>10 А</option>
-                      <option value={16}>16 А</option>
-                      <option value={25}>25 А</option>
-                      <option value={32}>32 А</option>
+                      <option value={6}>6 А</option><option value={10}>10 А</option><option value={16}>16 А</option><option value={25}>25 А</option>
                     </select>
                   </div>
                 )}
@@ -191,6 +211,11 @@ function App() {
                     <label style={{ fontSize: '12px', display: 'block', marginBottom: '5px' }}>Мощность (Вт):</label>
                     <input type="number" value={comp.params.power} onChange={(e) => updateComponentParam(comp.id, 'power', Number(e.target.value))} style={{ width: '100%', padding: '5px', background: '#333', color: '#fff', border: '1px solid #555' }} />
                   </div>
+                )}
+                {comp.deviceId === 'switch' && (
+                  <button onClick={() => updateComponentParam(comp.id, 'closed', !comp.params.closed)} style={{ width: '100%', padding: '8px', background: comp.params.closed ? '#2ecc71' : '#555', color: '#fff', border: 'none', cursor: 'pointer' }}>
+                    {comp.params.closed ? 'ВКЛ' : 'ВЫКЛ'}
+                  </button>
                 )}
                 <button onClick={() => setSelectedCompId(null)} style={{ marginTop: '15px', background: '#555', color: '#fff', border: 'none', padding: '5px 10px', cursor: 'pointer', width: '100%' }}>Закрыть</button>
               </div>

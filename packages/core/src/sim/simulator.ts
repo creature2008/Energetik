@@ -40,18 +40,13 @@ export function runSimulation(project: Project): SimulationResult {
     const netL = getNet(supplyComp.id, 'L');
     const netN = getNet(supplyComp.id, 'N');
     if (netL && netN) {
-      elements.push({
-        type: 'voltageSource',
-        nodeA: netIndex.get(netL)!,
-        nodeB: netIndex.get(netN)!,
-        voltage: 220
-      });
+      elements.push({ type: 'voltageSource', nodeA: netIndex.get(netL)!, nodeB: netIndex.get(netN)!, voltage: 220 });
       groundIdx = netIndex.get(netN)!;
     } else {
-      events.push({ type: 'info', message: 'Источник не подключён (L=' + netL + ', N=' + netN + ')' });
+      events.push({ type: 'info', message: 'Источник не подключён' });
     }
   } else {
-    events.push({ type: 'info', message: 'В схеме нет источника питания' });
+    events.push({ type: 'info', message: 'В схеме нет источника' });
   }
 
   if (groundIdx < 0) {
@@ -72,9 +67,10 @@ export function runSimulation(project: Project): SimulationResult {
     if (comp.deviceId === 'breaker' && comp.params.tripped !== true) {
       elements.push({ type: 'resistor', nodeA: netIndex.get(netL)!, nodeB: netIndex.get(netN)!, resistance: 0.001 });
     }
+    if (comp.deviceId === 'switch' && comp.params.closed === true) {
+      elements.push({ type: 'resistor', nodeA: netIndex.get(netL)!, nodeB: netIndex.get(netN)!, resistance: 0.001 });
+    }
   }
-
-
 
   const result = solveMna(nets.length, elements, groundIdx);
 
@@ -95,4 +91,3 @@ export function runSimulation(project: Project): SimulationResult {
 
   return { netVoltages, pinVoltages, wireCurrents: new Map(), events };
 }
-
