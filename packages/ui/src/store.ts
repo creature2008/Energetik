@@ -76,26 +76,19 @@ export const useStore = create<UIState>((set) => ({
 export const buildProjectForSimulation = () => {
   const state = useStore.getState();
   
-  // Передаем РЕАЛЬНЫЕ клеммы (L и N)
+  // Просто передаем всё как есть! Без виртуальных источников.
   const components = state.components.map(c => ({
     id: c.id,
     deviceId: c.deviceId,
     params: c.params,
-    pins: { L: { id: 'L' }, N: { id: 'N' } }
+    pins: c.pins // Используем реальные пины (L и N)
   }));
 
-  const supplyComp = state.components.find(c => c.deviceId === 'supply');
-  
-  if (supplyComp) {
-    components.push({ id: '__supply__', deviceId: 'supply', params: {}, pins: { L: { id: 'L' }, N: { id: 'N' } } });
-  }
-
-  // Провода передаем как есть! Если это L, значит L. Если N, значит N.
   const wires = state.wires.map((w, i) => ({
     id: w.id,
     number: i + 1,
-    from: { compId: w.from.compId === supplyComp?.id ? '__supply__' : w.from.compId, pinId: w.from.pinId },
-    to: { compId: w.to.compId === supplyComp?.id ? '__supply__' : w.to.compId, pinId: w.to.pinId },
+    from: w.from,
+    to: w.to,
     color: w.color || '#3498db',
     crossSection: w.crossSection || 2.5,
     waypoints: w.waypoints || [],

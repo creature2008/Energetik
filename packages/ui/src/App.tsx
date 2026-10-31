@@ -1,5 +1,5 @@
 ﻿import React, { useState } from 'react';
-import { Stage, Layer, Rect, Text, Group, Circle, Line, Image as KonvaImage } from 'react-konva';
+import { Stage, Layer, Rect, Group, Circle, Line, Image as KonvaImage } from 'react-konva';
 import { runSimulation } from '@electro/core';
 import { useStore, buildProjectForSimulation } from './store';
 import useImage from 'use-image';
