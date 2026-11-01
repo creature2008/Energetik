@@ -1,12 +1,12 @@
 export type { MnaElement } from './sim/mna';
 import type { MnaElement } from './sim/mna';
 
-export type PinDef = { id: string; label: string; side: 'left' | 'right'; color?: string };
+export type PinDef = { id: string; label: string; side: 'left' | 'right' | 'top' | 'bottom'; color?: string };
 
 export type ParamDef = {
-  key: string; label: string; type: 'number' | 'select' | 'boolean';
-  default: number | string | boolean;
-  options?: { value: string | number; label: string }[];
+  key: string; label: string; type: 'number' | 'select' | 'boolean' | 'loads';
+  default: number | string | boolean | any[];
+  options?: { value: string | number; label: string; power?: number }[];
 };
 
 export interface StampCtx {
@@ -19,7 +19,10 @@ export interface EvalCtx {
   comp: { id: string; params: Record<string, any> };
   volts(a: string, b: string): number;
   current: number;
+  sumCurrent: number;
   isIsolated(a: string, b: string): boolean;
+  signedVolts(a: string, b: string): number;
+  isAC: boolean;
 }
 
 export interface Visual {
@@ -27,6 +30,7 @@ export interface Visual {
   spinning?: boolean;
   label?: string;
   tint?: string;
+  warning?: boolean;
 }
 
 export type SimEvent = {

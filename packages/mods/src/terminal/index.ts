@@ -1,7 +1,8 @@
-﻿import type { DeviceMod } from '@electro/core';
+import type { DeviceMod } from '@electro/core';
 export const terminal: DeviceMod = {
   id: 'terminal', name: 'Клеммник', category: 'boxes',
   size: { w: 80, h: 60 },
+  icon: 'terminal.svg',
   pins: [
     { id: '1', label: '1', side: 'left', color: '#7f8c8d' },
     { id: '2', label: '2', side: 'left', color: '#7f8c8d' },

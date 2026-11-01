@@ -1,7 +1,8 @@
-﻿import type { DeviceMod } from '@electro/core';
+import type { DeviceMod } from '@electro/core';
 export const psu_12v: DeviceMod = {
   id: 'psu_12v', name: 'БП 12В', category: 'psu',
   size: { w: 80, h: 60 },
+  icon: 'psu_12v.svg',
   pins: [
     { id: 'L', label: 'L', side: 'left', color: '#fff' },
     { id: 'N', label: 'N', side: 'left', color: '#3498db' },

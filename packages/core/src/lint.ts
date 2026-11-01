@@ -1,4 +1,4 @@
-import { Project } from './types';
+﻿import { Project } from './types';
 import { registry } from './registry';
 import type { SimEvent } from './mod-api';
 
@@ -18,10 +18,15 @@ export function lintProtection(project: Project): SimEvent[] {
     addEdge(wire.from.compId + ':' + wire.from.pinId, wire.to.compId + ':' + wire.to.pinId);
   }
 
-  // Внутренние связи только для автоматов и закрытых выключателей.
+  // Внутренние связи: автоматы (in↔out каждого полюса) и закрытые выключатели
   for (const comp of project.components) {
-    if (comp.deviceId === 'breaker') {
-      addEdge(comp.id + ':L', comp.id + ':N');
+    if (comp.deviceId.startsWith('breaker')) {
+      for (const pinId of Object.keys(comp.pins)) {
+        if (pinId.endsWith('_in')) {
+          const outId = pinId.replace('_in', '_out');
+          if (comp.pins[outId]) addEdge(comp.id + ':' + pinId, comp.id + ':' + outId);
+        }
+      }
     }
     if (comp.deviceId === 'switch' && comp.params.closed === true) {
       addEdge(comp.id + ':L', comp.id + ':N');
@@ -30,10 +35,14 @@ export function lintProtection(project: Project): SimEvent[] {
 
   const sources = project.components.filter(c => c.deviceId === 'supply' || c.deviceId === 'supply_3ph' || c.deviceId === 'supply_us_2ph');
   if (sources.length === 0) return events;
-  const source = sources[0];
 
-  // BFS от клеммы мотора: находим все автоматы вплоть до источника,
-  // но НЕ проходим сквозь них (автомат = граница защиты).
+  const sourceNodes = new Set<string>();
+  for (const s of sources) {
+    const mod = registry.get(s.deviceId);
+    if (!mod) continue;
+    for (const p of mod.pins) sourceNodes.add(s.id + ':' + p.id);
+  }
+
   const findBreakersOnSide = (startNode: string): { breakers: Set<string>; hitsSource: boolean } => {
     const breakers = new Set<string>();
     let hitsSource = false;
@@ -48,13 +57,13 @@ export function lintProtection(project: Project): SimEvent[] {
         const nextCompId = next.split(':')[0];
         const nextComp = project.components.find(c => c.id === nextCompId);
 
-        if (nextComp?.deviceId === 'supply') {
+        if (sources.some(s => s.id === nextCompId)) {
           hitsSource = true;
           continue;
         }
-        if (nextComp?.deviceId === 'breaker') {
+        if (nextComp?.deviceId.startsWith('breaker')) {
           breakers.add(nextCompId);
-          continue;  // не идём сквозь автомат
+          continue;
         }
         queue.push(next);
       }
@@ -69,13 +78,14 @@ export function lintProtection(project: Project): SimEvent[] {
     const mod = registry.get(motor.deviceId);
     if (!mod) continue;
 
-    const leftBreakers = findBreakersOnSide(motor.id + ':L');
-    const rightBreakers = findBreakersOnSide(motor.id + ':N');
-
-    // Мотор в цепи, если хотя бы одна клемма доходит до источника
-    if (!leftBreakers.hitsSource && !rightBreakers.hitsSource) continue;
-
-    const allBreakers = new Set<string>([...leftBreakers.breakers, ...rightBreakers.breakers]);
+    const allBreakers = new Set<string>();
+    let connected = false;
+    for (const pin of mod.pins) {
+      const res = findBreakersOnSide(motor.id + ':' + pin.id);
+      res.breakers.forEach(b => allBreakers.add(b));
+      if (res.hitsSource) connected = true;
+    }
+    if (!connected) continue;
 
     const power = Number(motor.params.power) || 1000;
     const multiplier = Number(motor.params.startupMultiplier) || 6;

@@ -16,10 +16,12 @@ export const lamp: DeviceMod = {
     const R = (comp.params.voltage ** 2) / comp.params.power;
     return [{ type: 'resistor', nodeA: a, nodeB: b, R }];
   },
-  evaluate({ volts, current, comp }) {
+  evaluate({ volts, comp }) {
     const dv = Math.abs(volts('L', 'N'));
     const vNom = comp.params.voltage || 220;
     const ratio = Math.min(Math.pow(dv / vNom, 2), 1);
-    return { visual: { glow: ratio, label: dv.toFixed(0) + 'В · ' + current.toFixed(2) + 'А' } };
+    // Если напряжение больше номинала на 10% - предупреждение
+    const warning = dv > vNom * 1.1;
+    return { visual: { glow: ratio, warning } };
   },
 };

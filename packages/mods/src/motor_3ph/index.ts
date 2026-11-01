@@ -1,7 +1,8 @@
-﻿import type { DeviceMod } from '@electro/core';
+import type { DeviceMod } from '@electro/core';
 export const motor_3ph: DeviceMod = {
   id: 'motor_3ph', name: 'Мотор 3-ф', category: 'motors',
   size: { w: 80, h: 60 },
+  icon: 'motor_3ph.svg',
   pins: [
     { id: 'L1', label: 'L1', side: 'left', color: '#fff' },
     { id: 'L2', label: 'L2', side: 'left', color: '#fff' },
@@ -24,6 +25,6 @@ export const motor_3ph: DeviceMod = {
   },
   evaluate({ volts }) {
     const avg = (Math.abs(volts('L1', 'N')) + Math.abs(volts('L2', 'N')) + Math.abs(volts('L3', 'N'))) / 3;
-    return { visual: { spinning: avg > 50, label: 'M 3~' } };
+    return { visual: { spinning: avg > 50 } };
   },
 };

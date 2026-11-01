@@ -1,4 +1,4 @@
-﻿import { create } from 'zustand';
+import { create } from 'zustand';
 import { registry } from '@electro/core';
 
 export type PinRef = { compId: string; pinId: string };
@@ -56,8 +56,14 @@ export const useStore = create<UIState>((set) => ({
   setWireColor: (wireId, color) => set((state) => ({ wires: state.wires.map(w => w.id === wireId ? { ...w, color } : w) })),
 }));
 
+const DEVICE_ALIASES: Record<string, string> = {
+  socket: 'socket_16a',
+  socket_32a_2p: 'socket_32a',
+};
+
 function hydrateComponent(comp: any): any {
-  const mod = registry.get(comp.deviceId);
+  const deviceId = DEVICE_ALIASES[comp.deviceId] || comp.deviceId;
+  const mod = registry.get(deviceId);
   if (!mod) return comp;
   const params: Record<string, any> = { ...comp.params };
   mod.params.forEach(p => {
@@ -67,7 +73,7 @@ function hydrateComponent(comp: any): any {
   mod.pins.forEach(p => {
     if (!pins[p.id]) pins[p.id] = { ...p };
   });
-  return { ...comp, params, pins };
+  return { ...comp, deviceId, params, pins };
 }
 
 export const loadProjectData = (data: { components: any[], wires: any[] }) => {
