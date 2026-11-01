@@ -1,4 +1,4 @@
-﻿import { Project } from '../types';
+import { Project } from '../types';
 import { buildNetlist } from '../netlist';
 import { solveIslands, MnaElement } from './mna';
 import { registry } from '../registry';
@@ -61,6 +61,16 @@ export function runSimulation(project: Project): SimulationResult {
           }
         }
       }
+      if (s.deviceId === 'supply_3ph_delta') {
+        const nL1 = getNet(s.id, 'L1');
+        const nL2 = getNet(s.id, 'L2');
+        const nL3 = getNet(s.id, 'L3');
+        if (nL1 && nL2 && nL3) {
+          // Два источника: L1-L2 (380∠0), L2-L3 (380∠-120). L1-L3 получается 380∠+120.
+          elements.push({ type: 'voltageSource', nodeA: netIndex.get(nL1)!, nodeB: netIndex.get(nL2)!, rms: 380, phaseDeg: 0, freq: 50, tag: s.id + ':12' });
+          elements.push({ type: 'voltageSource', nodeA: netIndex.get(nL2)!, nodeB: netIndex.get(nL3)!, rms: 380, phaseDeg: -120, freq: 50, tag: s.id + ':23' });
+        }
+      }
       if (s.deviceId === 'supply_us_2ph') {
         const nN = getNet(s.id, 'N');
         const nL1 = getNet(s.id, 'L1');
@@ -71,7 +81,7 @@ export function runSimulation(project: Project): SimulationResult {
     }
 
     for (const comp of project.components) {
-      if (['supply', 'supply_3ph', 'supply_us_2ph'].includes(comp.deviceId)) continue;
+      if (['supply', 'supply_3ph', 'supply_3ph_delta', 'supply_us_2ph'].includes(comp.deviceId)) continue;
       const mod = registry.get(comp.deviceId);
       if (!mod) continue;
       const els = mod.stamp({
@@ -109,7 +119,7 @@ export function runSimulation(project: Project): SimulationResult {
     // Оценка модов
     let changed = false;
     for (const comp of project.components) {
-      if (['supply', 'supply_3ph', 'supply_us_2ph'].includes(comp.deviceId)) continue;
+      if (['supply', 'supply_3ph', 'supply_3ph_delta', 'supply_us_2ph'].includes(comp.deviceId)) continue;
       const mod = registry.get(comp.deviceId);
       if (!mod?.evaluate) continue;
 

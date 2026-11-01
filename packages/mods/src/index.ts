@@ -1,6 +1,7 @@
 ﻿import { registry } from '@electro/core';
 import { supply } from './supply';
 import { supply_3ph } from './supply_3ph';
+import { supply_3ph_delta } from './supply_3ph_delta';
 import { supply_us_2ph } from './supply_us_2ph';
 import { lamp } from './lamp';
 import { led_strip } from './led_strip';
@@ -20,6 +21,7 @@ import { terminal } from './terminal';
 export function registerAllMods() {
   registry.register(supply);
   registry.register(supply_3ph);
+  registry.register(supply_3ph_delta);
   registry.register(supply_us_2ph);
   registry.register(lamp);
   registry.register(led_strip);
