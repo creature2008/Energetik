@@ -8,13 +8,16 @@ export const motor_3ph: DeviceMod = {
     { id: 'L3', label: 'L3', side: 'left', color: '#fff' },
     { id: 'N', label: 'N', side: 'right', color: '#3498db' },
   ],
-  params: [{ key: 'power', label: 'Мощность (Вт)', type: 'number', default: 3000 }],
+  params: [
+    { key: 'power', label: 'Мощность (Вт)', type: 'number', default: 3000 },
+    { key: 'startupMultiplier', label: 'Пусковой ток (×ном.)', type: 'number', default: 7 },
+  ],
   stamp({ comp, node }) {
     const a = node('L1'), b = node('N');
     if (a == null || b == null) return [];
     return [{ type: 'resistor', nodeA: a, nodeB: b, resistance: (380 * 380) / comp.params.power }];
   },
-  evaluate({ volts }) {
+  evaluate({ comp, volts }) {
     const dv = Math.abs(volts('L1', 'N'));
     return { visual: { spinning: dv > 50, label: 'M 3~' } };
   },

@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { Stage, Layer, Rect, Group, Circle, Line, Image as KonvaImage, Text, Arc } from 'react-konva';
-import { runSimulation, measure, registry } from '@electro/core';
+import { runSimulation, measure, registry, lintProtection } from '@electro/core';
 import { registerAllMods } from '@electro/mods';
-import { useStore, buildProjectForSimulation } from './store';
+import { useStore, buildProjectForSimulation, loadProjectData } from './store';
 import useImage from 'use-image';
 import { save, open } from '@tauri-apps/plugin-dialog';
 import { writeTextFile, readTextFile } from '@tauri-apps/plugin-fs';
@@ -34,7 +34,6 @@ function App() {
   const [probeA, setProbeA] = useState<ProbePoint | null>(null);
   const [probeB, setProbeB] = useState<ProbePoint | null>(null);
   const [measureResult, setMeasureResult] = useState<{ x: number, y: number, text: string, type: 'volt' | 'amp' } | null>(null);
-  
   const [isAltPressed, setIsAltPressed] = useState(false);
   const [isCtrlPressed, setIsCtrlPressed] = useState(false);
 
@@ -54,32 +53,27 @@ function App() {
 
   const handlePinClick = (compId: string, pinId: string, x: number, y: number, e: any) => {
     e.cancelBubble = true;
-    
-    // ВОЛЬТМЕТР (Ctrl)
     if (isCtrlPressed) {
       let newA = probeA;
       let newB = probeB;
-      
       if (!newA) newA = { compId, pinId, x, y };
       else if (!newB) newB = { compId, pinId, x, y };
       else { newA = { compId, pinId, x, y }; newB = null; }
-      
       setProbeA(newA);
       setProbeB(newB);
-
       if (newA && newB) {
         const r = measure(simResult, newA, newB);
-        let text = 'OL (не подключено)';
+        let text = 'OL';
         if (r.kind === 'ok') text = r.volts.toFixed(2) + ' В';
         else if (r.kind === 'isolated') text = 'OL (разные цепи)';
-        { const pos = e.target.getStage()?.getPointerPosition(); if (pos) setMeasureResult({ x: pos.x, y: pos.y - 40, text, type: 'volt' }); }
+        const pos = e.target.getStage()?.getPointerPosition();
+        if (pos) setMeasureResult({ x: pos.x, y: pos.y - 40, text, type: 'volt' });
       } else {
-        { const pos = e.target.getStage()?.getPointerPosition(); if (pos) setMeasureResult({ x: pos.x, y: pos.y - 40, text: 'Выберите 2-ю точку...', type: 'volt' }); }
+        const pos = e.target.getStage()?.getPointerPosition();
+        if (pos) setMeasureResult({ x: pos.x, y: pos.y - 40, text: 'Выберите 2-ю точку', type: 'volt' });
       }
       return;
     }
-
-    // Обычная работа с клеммами
     if (!activePin) setActivePin({ compId, pinId });
     else {
       if (activePin.compId !== compId || activePin.pinId !== pinId) addWire(activePin, { compId, pinId });
@@ -88,7 +82,6 @@ function App() {
   };
 
   const handleWireClick = (wire: any, e: any) => {
-    // Излом провода (Shift)
     if (e.evt.shiftKey) {
       e.cancelBubble = true;
       const stage = e.target.getStage();
@@ -104,18 +97,15 @@ function App() {
       }
       return;
     }
-
-    // АМПЕРМЕТР (Alt)
     if (isAltPressed) {
       e.cancelBubble = true;
       const curA = simResult?.componentCurrents?.get(wire.from.compId) || 0;
       const curB = simResult?.componentCurrents?.get(wire.to.compId) || 0;
       const current = Math.max(curA, curB);
-      { const pos = e.target.getStage()?.getPointerPosition(); if (pos) setMeasureResult({ x: pos.x, y: pos.y - 40, text: current.toFixed(3) + ' А', type: 'amp' }); }
+      const pos = e.target.getStage()?.getPointerPosition();
+      if (pos) setMeasureResult({ x: pos.x, y: pos.y - 40, text: current.toFixed(3) + ' А', type: 'amp' });
       return;
     }
-
-    // Обычная работа с проводами
     e.cancelBubble = true; 
     setSelectedWireId(wire.id); 
     setWireMenuPos({ x: e.evt.clientX - 250, y: e.evt.clientY - 50 }); 
@@ -152,7 +142,18 @@ function App() {
   const handleRunSimulation = () => {
     try {
       const project = buildProjectForSimulation();
-      setSimResult(runSimulation(project as any));
+      const res = runSimulation(project as any);
+      setSimResult(res);
+      
+      const lintEvents = lintProtection(project as any);
+      if (lintEvents.length > 0) {
+        setLogs(prev => {
+          const filtered = prev.filter(l => !l.startsWith('[ПУЭ]'));
+          return [...filtered, ...lintEvents.map((e: any) => '[ПУЭ] ' + e.message)];
+        });
+      } else {
+        setLogs(prev => prev.filter(l => !l.startsWith('[ПУЭ]')));
+      }
     } catch (err: any) {
       addLog('[ОШИБКА СИМУЛЯЦИИ] ' + (err.message || String(err)));
     }
@@ -172,35 +173,24 @@ function App() {
       const path = await open({ filters: [{ name: 'Electro Project', extensions: ['esproj'] }], multiple: false });
       if (!path) return;
       const parsed = JSON.parse(await readTextFile(path as string));
-      useStore.setState({ components: parsed.components || [], wires: parsed.wires || [] });
+      loadProjectData({ components: parsed.components || [], wires: parsed.wires || [] });
       addLog('[Система] Загружено');
     } catch (e: any) { addLog('[Ошибка] ' + e.message); }
   };
 
   useEffect(() => { if (!isPaused) handleRunSimulation(); }, [components, wires, isPaused]);
-  
   useEffect(() => {
     const anim = setInterval(() => setRotation(r => r + 5), 50);
     return () => clearInterval(anim);
   }, []);
-
-  // Слушаем клавиши для инструментов
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       if (e.key === 'Alt') setIsAltPressed(true);
       if (e.key === 'Control') setIsCtrlPressed(true);
     };
     const up = (e: KeyboardEvent) => {
-      if (e.key === 'Alt') {
-        setIsAltPressed(false);
-        if (measureResult?.type === 'amp') setMeasureResult(null);
-      }
-      if (e.key === 'Control') {
-        setIsCtrlPressed(false);
-        if (measureResult?.type === 'volt') setMeasureResult(null);
-        setProbeA(null);
-        setProbeB(null);
-      }
+      if (e.key === 'Alt') { setIsAltPressed(false); if (measureResult?.type === 'amp') setMeasureResult(null); }
+      if (e.key === 'Control') { setIsCtrlPressed(false); if (measureResult?.type === 'volt') setMeasureResult(null); setProbeA(null); setProbeB(null); }
     };
     window.addEventListener('keydown', down);
     window.addEventListener('keyup', up);
@@ -234,7 +224,10 @@ function App() {
           </button>
         )}
         {cfg.type === 'select' && (
-          <select value={comp.params[cfg.key]} onChange={(e) => updateComponentParam(comp.id, cfg.key, Number(e.target.value))} style={{ width: '100%', padding: '5px', background: '#333', color: '#fff', border: '1px solid #555' }}>
+          <select value={comp.params[cfg.key]} onChange={(e) => {
+            const val = isNaN(Number(e.target.value)) ? e.target.value : Number(e.target.value);
+            updateComponentParam(comp.id, cfg.key, val);
+          }} style={{ width: '100%', padding: '5px', background: '#333', color: '#fff', border: '1px solid #555' }}>
             {cfg.options?.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
           </select>
         )}
@@ -301,6 +294,19 @@ function App() {
                 const spinning = visual?.spinning === true;
                 const leftPins = Object.values(comp.pins).filter((p: any) => p.side === 'left');
                 const rightPins = Object.values(comp.pins).filter((p: any) => p.side === 'right');
+                
+                const isBreaker = comp.deviceId === 'breaker';
+                const breakerCurrent = simResult?.componentCurrents?.get(comp.id) || 0;
+                const rated = Number(comp.params.ratedCurrent) || 16;
+                const isTripped = comp.params.tripped === true;
+                const isOverloaded = isBreaker && breakerCurrent > rated * 0.9;
+                
+                let breakerColor = null;
+                if (isBreaker) {
+                  if (isTripped) breakerColor = '#e74c3c';
+                  else if (isOverloaded) breakerColor = '#f39c12';
+                  else breakerColor = '#2ecc71';
+                }
 
                 return (
                   <Group key={comp.id} x={comp.x} y={comp.y} draggable
@@ -316,6 +322,22 @@ function App() {
                     {visual?.label && visual.label.length > 0 ? (
                       <Text text={visual.label} x={mod.size.w/2 - 20} y={mod.size.h/2 - 5} fill="#fff" fontSize={11} fontStyle="bold" />
                     ) : null}
+
+                    {/* Динамический текст для автомата */}
+                    {isBreaker ? (
+                      <Text 
+                        text={(comp.params.curve || 'C') + (comp.params.ratedCurrent || 16)} 
+                        x={0} 
+                        y={mod.size.h - 15} 
+                        width={mod.size.w}
+                        align="center"
+                        fill="#000" 
+                        fontSize={12} 
+                        fontStyle="bold" 
+                      />
+                    ) : null}
+
+                    {breakerColor ? <Circle x={mod.size.w - 8} y={8} radius={5} fill={breakerColor} stroke="#000" strokeWidth={1} /> : null}
 
                     {leftPins.map((pin: any, idx: number) => (
                       <Circle key={pin.id} x={0} y={20 + idx * 15} radius={7} fill={activePin?.compId === comp.id && activePin?.pinId === pin.id ? '#f1c40f' : pin.color} stroke="#000" 
@@ -364,7 +386,7 @@ function App() {
       </div>
       <div className="logs">
         <h4>События:</h4>
-        {logs.map((log, i) => <div key={i} className="log-entry">{log}</div>)}
+        {logs.map((log, i) => <div key={i} className="log-entry" style={{ color: log.startsWith('[ПУЭ]') ? '#f39c12' : undefined }}>{log}</div>)}
       </div>
     </div>
   );

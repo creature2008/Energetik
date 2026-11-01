@@ -51,6 +51,27 @@ export const useStore = create<UIState>((set) => ({
   setWireColor: (wireId, color) => set((state) => ({ wires: state.wires.map(w => w.id === wireId ? { ...w, color } : w) })),
 }));
 
+/** Дополняет params и pins загруженного компонента дефолтами из мода */
+function hydrateComponent(comp: any): any {
+  const mod = registry.get(comp.deviceId);
+  if (!mod) return comp;
+  const params: Record<string, any> = { ...comp.params };
+  mod.params.forEach(p => {
+    if (params[p.key] === undefined) params[p.key] = p.default;
+  });
+  const pins: Record<string, any> = { ...comp.pins };
+  mod.pins.forEach(p => {
+    if (!pins[p.id]) pins[p.id] = { ...p };
+  });
+  return { ...comp, params, pins };
+}
+
+export const loadProjectData = (data: { components: any[], wires: any[] }) => {
+  const components = (data.components || []).map(hydrateComponent);
+  const wires = data.wires || [];
+  useStore.setState({ components, wires });
+};
+
 export const buildProjectForSimulation = () => {
   const state = useStore.getState();
   return {
