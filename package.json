@@ -4,5 +4,9 @@
   "private": true,
   "scripts": {
     "test": "pnpm -r test"
+  },
+  "dependencies": {
+    "@tauri-apps/plugin-dialog": "~2.8.4",
+    "@tauri-apps/plugin-fs": "~2.7.1"
   }
 }

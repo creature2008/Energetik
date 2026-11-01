@@ -3,6 +3,8 @@ import { Stage, Layer, Rect, Group, Circle, Line, Image as KonvaImage } from 're
 import { runSimulation } from '@electro/core';
 import { useStore, buildProjectForSimulation } from './store';
 import useImage from 'use-image';
+import { save, open } from '@tauri-apps/plugin-dialog';
+import { writeTextFile, readTextFile } from '@tauri-apps/plugin-fs';
 
 const GRID_SIZE = 10;
 
@@ -23,9 +25,11 @@ function App() {
 
   const { components, wires, addComponent, updatePosition, activePin, setActivePin, addWire, removeWire, updateComponentParam, insertWaypoint, updateWaypoint, removeWaypoint, setWireColor } = useStore();
 
+  const addLog = (msg: string) => setLogs(prev => [...prev, msg]);
+
   const handleAdd = (deviceId: string) => {
     addComponent(deviceId, snap(100 + Math.random() * 300), snap(100 + Math.random() * 200));
-    setLogs(prev => [...prev, '[UI] Добавлено: ' + deviceId]);
+    addLog('[UI] Добавлено: ' + deviceId);
   };
 
   const handlePinClick = (compId: string, pinId: string, e: any) => {
@@ -56,7 +60,7 @@ function App() {
     const end = getPinPos(wire.to.compId, wire.to.pinId);
     if (!start || !end) return [];
     let pts: any[] = [{x: start.x, y: start.y}];
-    wire.waypoints.forEach((wp: any) => pts.push(wp));
+    (wire.waypoints || []).forEach((wp: any) => pts.push(wp));
     pts.push({x: end.x, y: end.y});
     return pts;
   };
@@ -67,12 +71,35 @@ function App() {
     setSimResult(result);
   };
 
-  // АВТОСИМУЛЯЦИЯ
+  const handleSaveProject = async () => {
+    try {
+      const path = await save({ filters: [{ name: 'Electro Project', extensions: ['esproj'] }] });
+      if (!path) return;
+      const data = JSON.stringify({ components, wires }, null, 2);
+      await writeTextFile(path, data);
+      addLog('[Система] Проект сохранен: ' + path);
+    } catch (e) {
+      addLog('[Ошибка] Не удалось сохранить: ' + e);
+    }
+  };
+
+  const handleLoadProject = async () => {
+    try {
+      const path = await open({ filters: [{ name: 'Electro Project', extensions: ['esproj'] }], multiple: false });
+      if (!path) return;
+      const data = await readTextFile(path as string);
+      const parsed = JSON.parse(data);
+      useStore.setState({ components: parsed.components || [], wires: parsed.wires || [] });
+      addLog('[Система] Проект загружен!');
+    } catch (e) {
+      addLog('[Ошибка] Не удалось загрузить: ' + e);
+    }
+  };
+
   useEffect(() => {
     if (!isPaused) handleRunSimulation();
   }, [components, wires, isPaused]);
 
-  // Функция отрисовки сетки (видимая область)
   const renderGrid = (width: number, height: number, scaleX: number, x: number, y: number) => {
     const lines = [];
     const startX = -x / scaleX;
@@ -80,11 +107,9 @@ function App() {
     const startY = -y / scaleX;
     const endY = (height - y) / scaleX;
 
-    // Вертикальные
     for (let i = Math.floor(startX / GRID_SIZE) * GRID_SIZE; i < endX; i += GRID_SIZE) {
       lines.push(<Line key={'v'+i} points={[i, startY, i, endY]} stroke="#333" strokeWidth={1 / scaleX} />);
     }
-    // Горизонтальные
     for (let i = Math.floor(startY / GRID_SIZE) * GRID_SIZE; i < endY; i += GRID_SIZE) {
       lines.push(<Line key={'h'+i} points={[startX, i, endX, i]} stroke="#333" strokeWidth={1 / scaleX} />);
     }
@@ -104,6 +129,11 @@ function App() {
           <button className="device-btn" onClick={() => setIsPaused(!isPaused)} style={{ background: isPaused ? '#cc7000' : '#0055aa', marginTop: '20px', fontWeight: 'bold' }}>
             {isPaused ? '▶ Продолжить' : '⏸ Пауза'}
           </button>
+
+          <div style={{ marginTop: '20px', borderTop: '1px solid #444', paddingTop: '10px' }}>
+            <button className="device-btn" onClick={handleSaveProject} style={{ background: '#2ecc71', marginBottom: '5px' }}>💾 Сохранить</button>
+            <button className="device-btn" onClick={handleLoadProject} style={{ background: '#3498db' }}>📂 Загрузить</button>
+          </div>
         </div>
         
         <div className="canvas-area" onClick={() => { setWireMenuPos(null); setSelectedCompId(null); }}>
@@ -111,9 +141,6 @@ function App() {
             width={window.innerWidth - 250} 
             height={window.innerHeight - 180}
             draggable
-            onDragEnd={(e) => {
-              // Обновляем только позицию сцены, ничего больше
-            }}
             onWheel={(e) => {
               e.evt.preventDefault();
               const stage = e.target.getStage();
@@ -128,7 +155,6 @@ function App() {
             }}
           >
             <Layer>
-              {/* Сетка */}
               {renderGrid(window.innerWidth - 250, window.innerHeight - 180, 1, 0, 0)}
 
               {wires.map(wire => {
@@ -138,9 +164,34 @@ function App() {
                 return (
                   <Group key={wire.id}>
                     <Line points={flat} stroke={wire.color || '#3498db'} strokeWidth={5} lineCap="round" lineJoin="round" hitStrokeWidth={20}
-                      onContextMenu={(e) => { e.evt.preventDefault(); e.cancelBubble = true; setSelectedWireId(wire.id); setWireMenuPos({ x: e.evt.clientX - 250, y: e.evt.clientY - 50 }); setSelectedCompId(null); }}
+                      onClick={(e) => {
+                        // SHIFT + КЛИК ДОБАВЛЯЕТ ТОЧКУ
+                        if (e.evt.shiftKey) {
+                          e.cancelBubble = true;
+                          const stage = e.target.getStage();
+                          const pointer = stage?.getPointerPosition();
+                          if (pointer) {
+                            let insertIndex = 0;
+                            for (let i = 0; i < pts.length - 1; i++) {
+                              const p1 = pts[i]; const p2 = pts[i + 1];
+                              if (pointer.x >= Math.min(p1.x, p2.x) - 10 && pointer.x <= Math.max(p1.x, p2.x) + 10 &&
+                                  pointer.y >= Math.min(p1.y, p2.y) - 10 && pointer.y <= Math.max(p1.y, p2.y) + 10) {
+                                insertIndex = i; break;
+                              }
+                            }
+                            insertWaypoint(wire.id, snap(pointer.x), snap(pointer.y), insertIndex);
+                            addLog('[UI] Добавлена точка на провод: ' + wire.id);
+                          }
+                        } else {
+                          // Обычный клик открывает меню
+                          e.cancelBubble = true;
+                          setSelectedWireId(wire.id);
+                          setWireMenuPos({ x: e.evt.clientX - 250, y: e.evt.clientY - 50 });
+                          setSelectedCompId(null);
+                        }
+                      }}
                     />
-                    {wire.waypoints.map((wp: any, i: number) => (
+                    {(wire.waypoints || []).map((wp: any, i: number) => (
                       <Circle key={i} x={wp.x} y={wp.y} radius={5} fill="#f1c40f" stroke="#000" draggable
                         onDragMove={(e) => { e.target.x(snap(e.target.x())); e.target.y(snap(e.target.y())); }}
                         onDragEnd={(e) => updateWaypoint(wire.id, i, e.target.x(), e.target.y())}
@@ -164,10 +215,7 @@ function App() {
                   <Group key={comp.id} x={comp.x} y={comp.y} draggable
                     onClick={(e) => { e.cancelBubble = true; setSelectedCompId(comp.id); setWireMenuPos(null); }}
                     onDragMove={(e) => { e.target.x(snap(e.target.x())); e.target.y(snap(e.target.y())); }}
-                    onDragEnd={(e) => {
-                      e.cancelBubble = true; // Останавливаем всплытие, чтобы камера не двигалась
-                      updatePosition(comp.id, e.target.x(), e.target.y());
-                    }}
+                    onDragEnd={(e) => { e.cancelBubble = true; updatePosition(comp.id, e.target.x(), e.target.y()); }}
                   >
                     {isLampOn && <Circle x={40} y={30} radius={50} fill="yellow" opacity={lampOpacity} />}
                     {isTripped && <Rect width={80} height={60} fill="red" opacity={0.5} cornerRadius={4} />}
