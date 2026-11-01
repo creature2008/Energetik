@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Stage, Layer, Rect, Group, Circle, Line, Image as KonvaImage, Text, Arc } from 'react-konva';
 import { runSimulation, measure, registry, lintProtection } from '@electro/core';
 import { registerAllMods } from '@electro/mods';
@@ -48,7 +48,6 @@ function App() {
   // Выделение рамкой
   const [selStart, setSelStart] = useState<{x: number, y: number} | null>(null);
   const [selEnd, setSelEnd] = useState<{x: number, y: number} | null>(null);
-  const draggingRef = useRef(false);
 
   // Панель проблем
   const [showProblems, setShowProblems] = useState(false);
@@ -481,20 +480,27 @@ function App() {
             }}
             onMouseDown={(e) => {
               const stage = e.target.getStage(); if (!stage) return;
-              if (e.target === stage) {
-                const p = stage.getPointerPosition(); if (p) { setSelStart(p); setSelEnd(p); }
+              if (e.target === stage && e.evt.shiftKey) {
+                const p = stage.getRelativePointerPosition();
+                if (p) { setSelStart(p); setSelEnd(p); }
               }
             }}
             onMouseMove={(e) => {
               if (!selStart) return;
               const stage = e.target.getStage(); if (!stage) return;
-              const p = stage.getPointerPosition(); if (p) setSelEnd(p);
+              const p = stage.getRelativePointerPosition();
+              if (p) setSelEnd(p);
             }}
             onMouseUp={() => {
               if (selStart && selEnd && (Math.abs(selStart.x - selEnd.x) > 5 || Math.abs(selStart.y - selEnd.y) > 5)) {
                 const x1 = Math.min(selStart.x, selEnd.x), x2 = Math.max(selStart.x, selEnd.x);
                 const y1 = Math.min(selStart.y, selEnd.y), y2 = Math.max(selStart.y, selEnd.y);
-                const hit = components.filter(c => c.x + 40 >= x1 && c.x + 40 <= x2 && c.y + 30 >= y1 && c.y + 30 <= y2).map(c => c.id);
+                const hit = components.filter(c => {
+                  const mod = registry.get(c.deviceId);
+                  if (!mod) return false;
+                  const cx1 = c.x, cy1 = c.y, cx2 = c.x + mod.size.w, cy2 = c.y + mod.size.h;
+                  return cx2 >= x1 && cx1 <= x2 && cy2 >= y1 && cy1 <= y2;
+                }).map(c => c.id);
                 setSelection(hit, []);
               }
               setSelStart(null); setSelEnd(null);
