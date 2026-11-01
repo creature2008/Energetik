@@ -1,4 +1,5 @@
 ﻿import { Project, Net } from './types';
+import { registry } from './registry';
 
 export function buildNetlist(project: Project): Net[] {
   const parent = new Map<string, string>();
@@ -13,22 +14,19 @@ export function buildNetlist(project: Project): Net[] {
     parent.set(find(a), find(b));
   }
 
-  // 1. Добавляем ВСЕ пины в parent (чтобы у каждого был узел)
-  for (const c of project.components) {
-    for (const pinId of Object.keys(c.pins)) {
-      const key = c.id + ':' + pinId;
-      parent.set(key, key);
+  // Все пины из модов
+  for (const comp of project.components) {
+    const mod = registry.get(comp.deviceId);
+    if (!mod) continue;
+    for (const pin of mod.pins) {
+      parent.set(comp.id + ':' + pin.id, comp.id + ':' + pin.id);
     }
   }
 
-  // 2. Объединяем проводами
   for (const w of project.wires) {
-    const a = w.from.compId + ':' + w.from.pinId;
-    const b = w.to.compId + ':' + w.to.pinId;
-    union(a, b);
+    union(w.from.compId + ':' + w.from.pinId, w.to.compId + ':' + w.to.pinId);
   }
 
-  // 3. Собираем группы
   const groups = new Map<string, { compId: string; pinId: string }[]>();
   for (const key of Array.from(parent.keys())) {
     const root = find(key);

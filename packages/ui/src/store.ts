@@ -1,4 +1,5 @@
 ﻿import { create } from 'zustand';
+import { registry } from '@electro/core';
 
 export type PinRef = { compId: string; pinId: string };
 export type Point = { x: number; y: number };
@@ -21,18 +22,19 @@ type UIState = {
 export const useStore = create<UIState>((set) => ({
   components: [], wires: [], activePin: null,
   addComponent: (deviceId, x, y) => set((state) => {
+    const mod = registry.get(deviceId);
+    if (!mod) return state;
     const id = deviceId + '_' + Date.now();
-    let pins: Record<string, any> = { L: { id: 'L' }, N: { id: 'N' } };
-    let params: any = {};
-    if (deviceId === 'lamp') { params.power = 100; params.voltage = 220; }
-    if (deviceId === 'breaker') { params.ratedCurrent = 16; params.tripped = false; }
-    if (deviceId === 'switch') { params.closed = false; } // По умолчанию выключен
+    const pins: Record<string, any> = {};
+    mod.pins.forEach(p => pins[p.id] = { ...p });
+    const params: Record<string, any> = {};
+    mod.params.forEach(p => params[p.key] = p.default);
     return { components: [...state.components, { id, deviceId, pins, params, x, y }] };
   }),
   updatePosition: (id, x, y) => set((state) => ({ components: state.components.map(c => c.id === id ? { ...c, x, y } : c) })),
   setActivePin: (pin) => set({ activePin: pin }),
   addWire: (from, to) => set((state) => {
-    const exists = state.wires.some(w => 
+    const exists = state.wires.some(w =>
       (w.from.compId === from.compId && w.from.pinId === from.pinId && w.to.compId === to.compId && w.to.pinId === to.pinId) ||
       (w.from.compId === to.compId && w.from.pinId === to.pinId && w.to.compId === from.compId && w.to.pinId === from.pinId)
     );
@@ -54,8 +56,15 @@ export const buildProjectForSimulation = () => {
   return {
     schemaVersion: 1,
     meta: { id: 'ui', name: 'UI', createdAt: '', updatedAt: '', appVersion: '0.1.0' },
-    components: state.components.map(c => ({ id: c.id, deviceId: c.deviceId, params: c.params, pins: { L: { id: 'L' }, N: { id: 'N' } } })),
-    wires: state.wires.map((w, i) => ({ id: w.id, number: i + 1, from: w.from, to: w.to, color: w.color || '#3498db', crossSection: w.crossSection || 2.5, waypoints: w.waypoints || [], routing: 'manual' })),
+    components: state.components.map(c => ({
+      id: c.id, deviceId: c.deviceId, params: c.params,
+      pins: Object.fromEntries(Object.keys(c.pins).map(id => [id, { id }]))
+    })),
+    wires: state.wires.map((w, i) => ({
+      id: w.id, number: i + 1, from: w.from, to: w.to,
+      color: w.color || '#3498db', crossSection: w.crossSection || 2.5,
+      waypoints: w.waypoints || [], routing: 'manual'
+    })),
     nets: [],
     layout: { schematic: {}, realistic: {} },
     settings: { supply: { type: '220' }, units: 'metric' }
