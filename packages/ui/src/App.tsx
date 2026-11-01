@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect, useRef } from 'react';
 import { Stage, Layer, Rect, Group, Circle, Line, Image as KonvaImage, Text, Arc } from 'react-konva';
 import { runSimulation, measure, registry, lintProtection } from '@electro/core';
 import { registerAllMods } from '@electro/mods';
 import { useStore, buildProjectForSimulation, loadProjectData } from './store';
+import { CABLES, getCableById, CableSpec } from './cables';
 import useImage from 'use-image';
 import { save, open } from '@tauri-apps/plugin-dialog';
 import { writeTextFile, readTextFile } from '@tauri-apps/plugin-fs';
@@ -19,7 +20,7 @@ const DeviceImage = ({ src, x, y, width, height }: any) => {
   const [img] = useImage(src);
   return <KonvaImage image={img} x={x} y={y} width={width} height={height} />;
 };
-const snap = (val: number) => Math.round(val / GRID_SIZE) * GRID_SIZE;
+const snap = (v: number) => Math.round(v / GRID_SIZE) * GRID_SIZE;
 type ProbePoint = { compId: string, pinId: string, x: number, y: number };
 
 function App() {
@@ -32,7 +33,7 @@ function App() {
   const [isPaused, setIsPaused] = useState(false);
   const [rotation, setRotation] = useState(0);
   const [blink, setBlink] = useState(true);
-  
+
   const [probeA, setProbeA] = useState<ProbePoint | null>(null);
   const [probeB, setProbeB] = useState<ProbePoint | null>(null);
   const [measureResult, setMeasureResult] = useState<{ x: number, y: number, text: string } | null>(null);
@@ -41,13 +42,34 @@ function App() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [openCategories, setOpenCategories] = useState<string[]>(['power']);
-
   const [stagePos, setStagePos] = useState({ x: 0, y: 0 });
   const [stageScale, setStageScale] = useState(1);
 
-  const { components, wires, addComponent, updatePosition, activePin, setActivePin, addWire, removeWire, updateComponentParam, removeComponent, insertWaypoint, updateWaypoint, removeWaypoint, setWireColor } = useStore();
+  // Выделение рамкой
+  const [selStart, setSelStart] = useState<{x: number, y: number} | null>(null);
+  const [selEnd, setSelEnd] = useState<{x: number, y: number} | null>(null);
+  const draggingRef = useRef(false);
+
+  // Панель проблем
+  const [showProblems, setShowProblems] = useState(false);
+
+  // Верхняя панель кабеля
+  const [cableMenuOpen, setCableMenuOpen] = useState(false);
+  const [cableFilterMat, setCableFilterMat] = useState<'all' | 'copper' | 'aluminum'>('all');
+  const [cableFilterFlex, setCableFilterFlex] = useState<'all' | 'solid' | 'stranded'>('all');
+  const [cableFilterCores, setCableFilterCores] = useState<number | null>(null);
+
+  const {
+    components, wires, addComponent, updatePosition, activePin, setActivePin,
+    addWire, removeWire, updateWire, updateComponentParam, removeComponent, removeSelected,
+    insertWaypoint, updateWaypoint, removeWaypoint, setWireColor,
+    selectedCompIds, selectedWireIds, setSelection, toggleSelection, clearSelection,
+    copySelection, pasteSelection, undo, redo, resetAllPower, importProject,
+    selectedCable, setSelectedCable, applyCableToWires,
+  } = useStore();
 
   const addLog = (msg: string) => setLogs(prev => [...prev, msg]);
+  const addHistory = useStore(s => s.pushHistory);
 
   const handleAdd = (deviceId: string) => {
     addComponent(deviceId, snap(100 + Math.random() * 300), snap(100 + Math.random() * 200));
@@ -93,38 +115,36 @@ function App() {
       const pointer = stage?.getPointerPosition();
       if (pointer) {
         const pts = getWirePointsArray(wire);
-        let insertIndex = 0;
+        let idx = 0;
         for (let i = 0; i < pts.length - 1; i++) {
           const p1 = pts[i]; const p2 = pts[i + 1];
-          if (pointer.x >= Math.min(p1.x, p2.x) - 10 && pointer.x <= Math.max(p1.x, p2.x) + 10 && pointer.y >= Math.min(p1.y, p2.y) - 10 && pointer.y <= Math.max(p1.y, p2.y) + 10) { insertIndex = i; break; }
+          if (pointer.x >= Math.min(p1.x, p2.x) - 10 && pointer.x <= Math.max(p1.x, p2.x) + 10 &&
+              pointer.y >= Math.min(p1.y, p2.y) - 10 && pointer.y <= Math.max(p1.y, p2.y) + 10) { idx = i; break; }
         }
-        insertWaypoint(wire.id, snap(pointer.x), snap(pointer.y), insertIndex);
+        insertWaypoint(wire.id, snap(pointer.x), snap(pointer.y), idx);
       }
       return;
     }
     if (isAltPressed) {
       e.cancelBubble = true;
-      const getPinCurrent = (compId: string, pinId: string) => {
+      const getCur = (compId: string, pinId: string) => {
         const comp = components.find(c => c.id === compId);
         if (!comp) return 0;
         const pin = comp.pins[pinId];
         if (!pin) return 0;
-        if (pin.label === 'N' || pin.side === 'right') {
-          return simResult?.componentNeutralCurrent?.get(compId) || 0;
-        }
+        if (pin.label === 'N' || pin.side === 'right') return simResult?.componentNeutralCurrent?.get(compId) || 0;
         return simResult?.componentCurrents?.get(compId) || 0;
       };
-      const curA = getPinCurrent(wire.from.compId, wire.from.pinId);
-      const curB = getPinCurrent(wire.to.compId, wire.to.pinId);
-      const current = Math.max(curA, curB);
+      const current = Math.max(getCur(wire.from.compId, wire.from.pinId), getCur(wire.to.compId, wire.to.pinId));
       const pos = e.target.getStage()?.getPointerPosition();
       if (pos) setMeasureResult({ x: pos.x, y: pos.y - 40, text: current.toFixed(3) + ' А' });
       return;
     }
-    e.cancelBubble = true; 
-    setSelectedWireId(wire.id); 
-    setWireMenuPos({ x: e.evt.clientX - 250, y: e.evt.clientY - 50 }); 
+    e.cancelBubble = true;
+    setSelectedWireId(wire.id);
+    setWireMenuPos({ x: e.evt.clientX - 250, y: e.evt.clientY - 50 });
     setSelectedCompId(null);
+    setCompMenuPos(null);
   };
 
   const getPinPos = (compId: string, pinId: string) => {
@@ -136,8 +156,7 @@ function App() {
     if (!mod) return null;
     const sidePins = Object.values(comp.pins).filter((p: any) => p.side === pin.side);
     const idx = sidePins.findIndex((p: any) => p.id === pinId);
-    const count = sidePins.length;
-    const frac = (idx + 1) / (count + 1);
+    const frac = (idx + 1) / (sidePins.length + 1);
     if (pin.side === 'left') return { x: comp.x, y: comp.y + 20 + idx * 15 };
     if (pin.side === 'right') return { x: comp.x + mod.size.w, y: comp.y + 20 + idx * 15 };
     if (pin.side === 'top') return { x: comp.x + mod.size.w * frac, y: comp.y };
@@ -155,7 +174,7 @@ function App() {
     const start = getPinPos(wire.from.compId, wire.from.pinId);
     const end = getPinPos(wire.to.compId, wire.to.pinId);
     if (!start || !end) return [];
-    let pts: any[] = [{x: start.x, y: start.y}];
+    const pts: any[] = [{x: start.x, y: start.y}];
     (wire.waypoints || []).forEach((wp: any) => pts.push(wp));
     pts.push({x: end.x, y: end.y});
     return pts;
@@ -166,18 +185,14 @@ function App() {
       const project = buildProjectForSimulation();
       const res = runSimulation(project as any);
       setSimResult(res);
-
       if (res.updatedParams.size > 0) {
         res.updatedParams.forEach((params: any, compId: any) => {
           Object.entries(params).forEach(([k, v]) => {
             const comp = components.find(c => c.id === compId);
-            if (comp && comp.params[k] !== v) {
-              updateComponentParam(compId, k, v);
-            }
+            if (comp && comp.params[k] !== v) updateComponentParam(compId, k, v);
           });
         });
       }
-      
       const lintEvents = lintProtection(project as any);
       if (lintEvents.length > 0) {
         setLogs(prev => {
@@ -211,19 +226,72 @@ function App() {
     } catch (e: any) { addLog('[Ошибка] ' + e.message); }
   };
 
+  const handlePasteFromClipboard = async () => {
+    try {
+      const txt = await navigator.clipboard.readText();
+      const data = JSON.parse(txt);
+      if (data && data.components) {
+        importProject({ components: data.components, wires: data.wires || [] });
+        addLog('[Система] Импортировано из буфера');
+      } else {
+        addLog('[Ошибка] В буфере не проект');
+      }
+    } catch (e: any) { addLog('[Ошибка импорта] ' + e.message); }
+  };
+
+  // Автосохранение черновика в localStorage (упрощённый аналог IndexedDB)
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (components.length === 0 && wires.length === 0) return;
+      try {
+        localStorage.setItem('electro-draft', JSON.stringify({ components, wires, savedAt: Date.now() }));
+      } catch {}
+    }, 2000);
+    return () => clearTimeout(t);
+  }, [components, wires]);
+
+  // Загрузка черновика при старте
+  useEffect(() => {
+    const raw = localStorage.getItem('electro-draft');
+    if (!raw) return;
+    try {
+      const d = JSON.parse(raw);
+      if (d.components?.length || d.wires?.length) {
+        loadProjectData({ components: d.components || [], wires: d.wires || [] });
+        setLogs(prev => [...prev, '[Система] Черновик восстановлен']);
+      }
+    } catch {}
+  }, []);
+
   useEffect(() => { if (!isPaused) handleRunSimulation(); }, [components, wires, isPaused]);
   useEffect(() => {
     const anim = setInterval(() => setRotation(r => r + 5), 50);
-    const blinkTimer = setInterval(() => setBlink(b => !b), 500);
-    return () => { clearInterval(anim); clearInterval(blinkTimer); };
+    const blinkT = setInterval(() => setBlink(b => !b), 500);
+    return () => { clearInterval(anim); clearInterval(blinkT); };
   }, []);
+
+  // Хоткеи
   useEffect(() => {
+    const isMac = navigator.platform.toUpperCase().includes('MAC');
     const down = (e: KeyboardEvent) => {
       if (e.key === 'Alt') setIsAltPressed(true);
       if (e.key === 'Control') setIsCtrlPressed(true);
-      if (e.key === 'Delete' && selectedCompId) {
-        removeComponent(selectedCompId);
+      const mod = isMac ? e.metaKey : e.ctrlKey;
+      if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); handleSaveProject(); }
+      if (mod && e.key.toLowerCase() === 'o') { e.preventDefault(); handleLoadProject(); }
+      if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); }
+      if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
+      if (mod && e.key.toLowerCase() === 'c') { copySelection(); }
+      if (mod && e.key.toLowerCase() === 'v') {
+        if (useStore.getState().clipboard) { e.preventDefault(); pasteSelection(20, 20); }
+      }
+      if (e.key === 'Delete') { removeSelected(); }
+      if (e.key === 'Escape') {
+        clearSelection();
         setSelectedCompId(null);
+        setWireMenuPos(null);
+        setCompMenuPos(null);
+        setProbeA(null); setProbeB(null); setMeasureResult(null);
       }
     };
     const up = (e: KeyboardEvent) => {
@@ -233,16 +301,16 @@ function App() {
     window.addEventListener('keydown', down);
     window.addEventListener('keyup', up);
     return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); };
-  }, [measureResult, selectedCompId, removeComponent]);
+  }, [measureResult, selectedCompId]);
 
   const renderGrid = (width: number, height: number) => {
     const lines = [];
-    const startX = Math.floor((-stagePos.x / stageScale) / GRID_SIZE) * GRID_SIZE;
-    const endX = Math.ceil(((width - stagePos.x) / stageScale) / GRID_SIZE) * GRID_SIZE;
-    const startY = Math.floor((-stagePos.y / stageScale) / GRID_SIZE) * GRID_SIZE;
-    const endY = Math.ceil(((height - stagePos.y) / stageScale) / GRID_SIZE) * GRID_SIZE;
-    for (let i = startX; i < endX; i += GRID_SIZE) lines.push(<Line key={'v'+i} points={[i, startY, i, endY]} stroke="#333" strokeWidth={1 / stageScale} />);
-    for (let i = startY; i < endY; i += GRID_SIZE) lines.push(<Line key={'h'+i} points={[startX, i, endX, i]} stroke="#333" strokeWidth={1 / stageScale} />);
+    const sx = Math.floor((-stagePos.x / stageScale) / GRID_SIZE) * GRID_SIZE;
+    const ex = Math.ceil(((width - stagePos.x) / stageScale) / GRID_SIZE) * GRID_SIZE;
+    const sy = Math.floor((-stagePos.y / stageScale) / GRID_SIZE) * GRID_SIZE;
+    const ey = Math.ceil(((height - stagePos.y) / stageScale) / GRID_SIZE) * GRID_SIZE;
+    for (let i = sx; i < ex; i += GRID_SIZE) lines.push(<Line key={'v'+i} points={[i, sy, i, ey]} stroke="#333" strokeWidth={1 / stageScale} />);
+    for (let i = sy; i < ey; i += GRID_SIZE) lines.push(<Line key={'h'+i} points={[sx, i, ex, i]} stroke="#333" strokeWidth={1 / stageScale} />);
     return lines;
   };
 
@@ -267,43 +335,33 @@ function App() {
         )}
         {cfg.type === 'select' && (
           <select value={comp.params[cfg.key]} onChange={(e) => {
-            const val = isNaN(Number(e.target.value)) ? e.target.value : Number(e.target.value);
-            updateComponentParam(comp.id, cfg.key, val);
+            const v = isNaN(Number(e.target.value)) ? e.target.value : Number(e.target.value);
+            updateComponentParam(comp.id, cfg.key, v);
           }} style={{ width: '100%', padding: '4px', background: '#333', color: '#fff', border: '1px solid #555' }}>
             {cfg.options?.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
           </select>
         )}
         {cfg.type === 'loads' && (() => {
           const loads = (comp.params[cfg.key] as any[]) || [];
-          const totalPower = loads.reduce((s, l) => s + (Number(l.power) || 0), 0);
-          const addLoad = (presetValue: string) => {
-            if (!presetValue) return;
-            const preset = cfg.options?.find(o => String(o.value) === presetValue);
-            if (!preset) return;
-            updateComponentParam(comp.id, cfg.key, [...loads, { id: Date.now(), name: preset.label, power: preset.power || 0 }]);
-          };
-          const removeLoad = (idx: number) => {
-            updateComponentParam(comp.id, cfg.key, loads.filter((_, i) => i !== idx));
-          };
+          const total = loads.reduce((s, l) => s + (Number(l.power) || 0), 0);
           return (
             <div>
-              <select value="" onChange={(e) => { addLoad(e.target.value); e.target.value = ''; }} style={{ width: '100%', padding: '4px', background: '#333', color: '#fff', border: '1px solid #555', marginBottom: '6px', fontSize: '12px' }}>
+              <select value="" onChange={(e) => {
+                const pv = e.target.value; if (!pv) return;
+                const preset = cfg.options?.find(o => String(o.value) === pv);
+                if (preset) updateComponentParam(comp.id, cfg.key, [...loads, { id: Date.now(), name: preset.label, power: preset.power || 0 }]);
+                e.target.value = '';
+              }} style={{ width: '100%', padding: '4px', background: '#333', color: '#fff', border: '1px solid #555', marginBottom: '6px', fontSize: '12px' }}>
                 <option value="">+ Добавить прибор...</option>
                 {cfg.options?.map(opt => <option key={opt.value} value={String(opt.value)}>{opt.label} ({opt.power}Вт)</option>)}
               </select>
-              {loads.length === 0 ? (<div style={{ fontSize: '11px', color: '#888', fontStyle: 'italic', marginBottom: '6px' }}>Пусто</div>) : (
-                <div style={{ marginBottom: '6px' }}>
-                  {loads.map((load, idx) => (
-                    <div key={load.id || idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#2a2a2a', padding: '4px 6px', borderRadius: '3px', marginBottom: '3px', fontSize: '11px' }}>
-                      <span>{load.name}: <b>{load.power}Вт</b></span>
-                      <button onClick={() => removeLoad(idx)} style={{ background: '#c0392b', color: '#fff', border: 'none', cursor: 'pointer', padding: '1px 6px', borderRadius: '2px', fontSize: '11px' }}>×</button>
-                    </div>
-                  ))}
+              {loads.map((l, idx) => (
+                <div key={l.id || idx} style={{ display: 'flex', justifyContent: 'space-between', background: '#2a2a2a', padding: '4px 6px', borderRadius: '3px', marginBottom: '3px', fontSize: '11px' }}>
+                  <span>{l.name}: <b>{l.power}Вт</b></span>
+                  <button onClick={() => updateComponentParam(comp.id, cfg.key, loads.filter((_, i) => i !== idx))} style={{ background: '#c0392b', color: '#fff', border: 'none', cursor: 'pointer', padding: '1px 6px', borderRadius: '2px' }}>×</button>
                 </div>
-              )}
-              <div style={{ fontSize: '12px', color: totalPower > 3520 ? '#e74c3c' : '#f1c40f', fontWeight: 'bold' }}>
-                Сумма: {totalPower} Вт ({totalPower > 0 ? (totalPower / 220).toFixed(1) : 0} А)
-              </div>
+              ))}
+              <div style={{ fontSize: '12px', color: total > 3520 ? '#e74c3c' : '#f1c40f', fontWeight: 'bold' }}>Сумма: {total} Вт ({(total / 220).toFixed(1)} А)</div>
             </div>
           );
         })()}
@@ -311,15 +369,66 @@ function App() {
     ));
   };
 
+  // Фильтр кабелей
+  const filteredCables = CABLES.filter(c => {
+    if (cableFilterMat !== 'all' && c.material !== cableFilterMat) return false;
+    if (cableFilterFlex !== 'all' && c.flexibility !== cableFilterFlex) return false;
+    if (cableFilterCores !== null && c.cores !== cableFilterCores) return false;
+    return true;
+  });
+
+  const problems = logs.filter(l => l.startsWith('[ПУЭ]'));
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', width: '100vw', height: '100vh' }}>
       <div className="topbar">
         <div className="topbar-title">⚡ Electro Studio</div>
         <div className="topbar-actions">
-          <button className="icon-btn" onClick={handleSaveProject} title="Сохранить">💾</button>
-          <button className="icon-btn" onClick={handleLoadProject} title="Загрузить">📂</button>
+          {/* Кнопка кабеля */}
+          <div style={{ position: 'relative' }}>
+            <button className="icon-btn" onClick={() => setCableMenuOpen(!cableMenuOpen)} title="Выбор кабеля" style={{ color: selectedCable ? '#f1c40f' : '#ccc', fontSize: '13px', padding: '4px 8px' }}>
+              🔌 {selectedCable ? selectedCable.display : 'Кабель'}
+            </button>
+            {cableMenuOpen && (
+              <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute', top: '100%', right: 0, background: '#252526', border: '1px solid #444', borderRadius: '6px', padding: '10px', zIndex: 1000, width: '420px', maxHeight: '500px', overflowY: 'auto' }}>
+                <div style={{ display: 'flex', gap: '5px', marginBottom: '8px', flexWrap: 'wrap' }}>
+                  <button onClick={() => setCableFilterMat('all')} style={{ padding: '3px 8px', background: cableFilterMat === 'all' ? '#3498db' : '#333', color: '#fff', border: 'none', borderRadius: '3px', cursor: 'pointer', fontSize: '11px' }}>Все</button>
+                  <button onClick={() => setCableFilterMat('copper')} style={{ padding: '3px 8px', background: cableFilterMat === 'copper' ? '#e67e22' : '#333', color: '#fff', border: 'none', borderRadius: '3px', cursor: 'pointer', fontSize: '11px' }}>Медь</button>
+                  <button onClick={() => setCableFilterMat('aluminum')} style={{ padding: '3px 8px', background: cableFilterMat === 'aluminum' ? '#95a5a6' : '#333', color: '#fff', border: 'none', borderRadius: '3px', cursor: 'pointer', fontSize: '11px' }}>Алюминий</button>
+                  <span style={{ width: '1px', background: '#444', margin: '0 4px' }} />
+                  <button onClick={() => setCableFilterFlex('all')} style={{ padding: '3px 8px', background: cableFilterFlex === 'all' ? '#3498db' : '#333', color: '#fff', border: 'none', borderRadius: '3px', cursor: 'pointer', fontSize: '11px' }}>Все жилы</button>
+                  <button onClick={() => setCableFilterFlex('solid')} style={{ padding: '3px 8px', background: cableFilterFlex === 'solid' ? '#2ecc71' : '#333', color: '#fff', border: 'none', borderRadius: '3px', cursor: 'pointer', fontSize: '11px' }}>Моножила</button>
+                  <button onClick={() => setCableFilterFlex('stranded')} style={{ padding: '3px 8px', background: cableFilterFlex === 'stranded' ? '#f39c12' : '#333', color: '#fff', border: 'none', borderRadius: '3px', cursor: 'pointer', fontSize: '11px' }}>Многожилка</button>
+                </div>
+                <div style={{ display: 'flex', gap: '4px', marginBottom: '8px' }}>
+                  <button onClick={() => setCableFilterCores(null)} style={{ padding: '3px 8px', background: cableFilterCores === null ? '#3498db' : '#333', color: '#fff', border: 'none', borderRadius: '3px', cursor: 'pointer', fontSize: '11px' }}>Любые</button>
+                  {[2,3,4,5].map(n => (
+                    <button key={n} onClick={() => setCableFilterCores(n)} style={{ padding: '3px 8px', background: cableFilterCores === n ? '#3498db' : '#333', color: '#fff', border: 'none', borderRadius: '3px', cursor: 'pointer', fontSize: '11px' }}>{n} жилы</button>
+                  ))}
+                </div>
+                <div style={{ borderTop: '1px solid #444', paddingTop: '8px' }}>
+                  {filteredCables.map(c => (
+                    <div key={c.id} onClick={() => { setSelectedCable(c); setCableMenuOpen(false); }}
+                      style={{ padding: '4px 8px', background: selectedCable?.id === c.id ? '#2c3e50' : 'transparent', color: '#ddd', cursor: 'pointer', fontSize: '12px', borderRadius: '3px', display: 'flex', justifyContent: 'space-between' }}>
+                      <span>{c.display}</span>
+                      <span style={{ color: '#888', fontSize: '11px' }}>{c.currentRating}А</span>
+                    </div>
+                  ))}
+                  {filteredCables.length === 0 && <div style={{ color: '#888', fontSize: '11px', padding: '5px' }}>Нет подходящих кабелей</div>}
+                </div>
+                <button onClick={() => setSelectedCable(null)} style={{ marginTop: '8px', width: '100%', padding: '5px', background: '#555', color: '#fff', border: 'none', borderRadius: '3px', cursor: 'pointer', fontSize: '11px' }}>Сбросить кабель</button>
+              </div>
+            )}
+          </div>
+          <button className="icon-btn" onClick={handleSaveProject} title="Сохранить (Ctrl+S)">💾</button>
+          <button className="icon-btn" onClick={handleLoadProject} title="Загрузить (Ctrl+O)">📂</button>
+          <button className="icon-btn" onClick={handlePasteFromClipboard} title="Импорт из буфера">📋</button>
           <button className="icon-btn" onClick={() => setIsPaused(!isPaused)} title={isPaused ? 'Продолжить' : 'Пауза'}>
             {isPaused ? '▶' : '⏸'}
+          </button>
+          <button className="icon-btn" onClick={resetAllPower} title="Сбросить питание (все автоматы и выключатели)">🔄</button>
+          <button className="icon-btn" onClick={() => setShowProblems(!showProblems)} title="Проблемы ПУЭ">
+            ⚠{problems.length > 0 ? ' ' + problems.length : ''}
           </button>
         </div>
       </div>
@@ -342,34 +451,67 @@ function App() {
             </div>
           ))}
         </div>
-        
-        <div className="canvas-area" onClick={() => { setWireMenuPos(null); setSelectedCompId(null); setCompMenuPos(null); }}>
-          <Stage 
-            width={window.innerWidth - 220} 
-            height={window.innerHeight - 40 - 140} 
-            draggable 
+
+        <div className="canvas-area"
+          onClick={() => { setWireMenuPos(null); setSelectedCompId(null); setCompMenuPos(null); setCableMenuOpen(false); }}
+          onDrop={async (e) => {
+            e.preventDefault();
+            const f = e.dataTransfer.files[0]; if (!f) return;
+            try {
+              const txt = await f.text();
+              const data = JSON.parse(txt);
+              if (data.components) { importProject({ components: data.components, wires: data.wires || [] }); addLog('[Система] Файл загружен'); }
+            } catch (err: any) { addLog('[Ошибка файла] ' + err.message); }
+          }}
+          onDragOver={(e) => e.preventDefault()}
+        >
+          <Stage
+            width={window.innerWidth - 220}
+            height={window.innerHeight - 40 - 140}
+            draggable={!selStart}
             onDragEnd={(e) => setStagePos({ x: e.target.x(), y: e.target.y() })}
             onWheel={(e) => {
               e.evt.preventDefault(); const stage = e.target.getStage(); if (!stage) return;
               const oldScale = stage.scaleX(); const pointer = stage.getPointerPosition(); if (!pointer) return;
-              const mousePointTo = { x: (pointer.x - stage.x()) / oldScale, y: (pointer.y - stage.y()) / oldScale };
-              const newScale = e.evt.deltaY > 0 ? oldScale * 0.9 : oldScale * 1.1;
-              stage.scale({ x: newScale, y: newScale }); 
-              stage.position({ x: pointer.x - mousePointTo.x * newScale, y: pointer.y - mousePointTo.y * newScale });
-              setStageScale(newScale);
-              setStagePos(stage.position());
+              const mp = { x: (pointer.x - stage.x()) / oldScale, y: (pointer.y - stage.y()) / oldScale };
+              const ns = e.evt.deltaY > 0 ? oldScale * 0.9 : oldScale * 1.1;
+              stage.scale({ x: ns, y: ns });
+              stage.position({ x: pointer.x - mp.x * ns, y: pointer.y - mp.y * ns });
+              setStageScale(ns); setStagePos(stage.position());
+            }}
+            onMouseDown={(e) => {
+              const stage = e.target.getStage(); if (!stage) return;
+              if (e.target === stage) {
+                const p = stage.getPointerPosition(); if (p) { setSelStart(p); setSelEnd(p); }
+              }
+            }}
+            onMouseMove={(e) => {
+              if (!selStart) return;
+              const stage = e.target.getStage(); if (!stage) return;
+              const p = stage.getPointerPosition(); if (p) setSelEnd(p);
+            }}
+            onMouseUp={() => {
+              if (selStart && selEnd && (Math.abs(selStart.x - selEnd.x) > 5 || Math.abs(selStart.y - selEnd.y) > 5)) {
+                const x1 = Math.min(selStart.x, selEnd.x), x2 = Math.max(selStart.x, selEnd.x);
+                const y1 = Math.min(selStart.y, selEnd.y), y2 = Math.max(selStart.y, selEnd.y);
+                const hit = components.filter(c => c.x + 40 >= x1 && c.x + 40 <= x2 && c.y + 30 >= y1 && c.y + 30 <= y2).map(c => c.id);
+                setSelection(hit, []);
+              }
+              setSelStart(null); setSelEnd(null);
             }}
           >
             <Layer>
               {renderGrid(window.innerWidth - 220, window.innerHeight - 40 - 140)}
+
               {wires.map(wire => {
                 const pts = getWirePointsArray(wire); if (pts.length < 2) return null;
                 const flat = pts.flatMap(p => [p.x, p.y]);
+                const cable = getCableById(wire.cableId || '');
+                const isSel = selectedWireIds.includes(wire.id);
                 return (
                   <Group key={wire.id}>
-                    <Line points={flat} stroke={wire.color || '#3498db'} strokeWidth={5} lineCap="round" lineJoin="round" hitStrokeWidth={20} 
-                      onClick={(e) => handleWireClick(wire, e)} 
-                    />
+                    <Line points={flat} stroke={isSel ? '#f1c40f' : (wire.color || '#3498db')} strokeWidth={cable ? Math.max(3, cable.crossSection) : 5} lineCap="round" lineJoin="round" hitStrokeWidth={20}
+                      onClick={(e) => handleWireClick(wire, e)} />
                     {(wire.waypoints || []).map((wp: any, i: number) => (
                       <Circle key={i} x={wp.x} y={wp.y} radius={5} fill="#f1c40f" stroke="#000" draggable
                         onDragMove={(e) => { e.target.x(snap(e.target.x())); e.target.y(snap(e.target.y())); }}
@@ -381,20 +523,18 @@ function App() {
               })}
 
               {components.map(comp => {
-                const mod = registry.get(comp.deviceId);
-                if (!mod) return null;
+                const mod = registry.get(comp.deviceId); if (!mod) return null;
                 const imgSrc = getImagePath(comp.deviceId);
                 const visual = simResult?.visuals?.get(comp.id);
                 const glow = Number(visual?.glow) || 0;
                 const spinning = visual?.spinning === true;
-
                 const leftPins = Object.values(comp.pins).filter((p: any) => p.side === 'left');
                 const rightPins = Object.values(comp.pins).filter((p: any) => p.side === 'right');
                 const topPins = Object.values(comp.pins).filter((p: any) => p.side === 'top');
                 const bottomPins = Object.values(comp.pins).filter((p: any) => p.side === 'bottom');
-                
                 const isBreaker = comp.deviceId.startsWith('breaker');
                 const isSwitch = comp.deviceId.startsWith('switch');
+                const isSelected = selectedCompIds.includes(comp.id);
                 const breakerCurrent = simResult?.componentCurrents?.get(comp.id) || 0;
                 const rated = Number(comp.params.ratedCurrent) || 16;
                 const isTripped = comp.params.tripped === true;
@@ -402,73 +542,50 @@ function App() {
 
                 return (
                   <Group key={comp.id} x={comp.x} y={comp.y} draggable
-                    onClick={(e) => { e.cancelBubble = true; setSelectedCompId(comp.id); setWireMenuPos(null); setCompMenuPos(null); }}
-                    onContextMenu={(e) => {
-                      e.evt.preventDefault();
+                    onClick={(e) => {
                       e.cancelBubble = true;
+                      if (e.evt.ctrlKey || e.evt.shiftKey) toggleSelection(comp.id);
+                      else setSelection([comp.id], []);
+                      setSelectedCompId(comp.id); setWireMenuPos(null); setCompMenuPos(null);
+                    }}
+                    onContextMenu={(e) => {
+                      e.evt.preventDefault(); e.cancelBubble = true;
                       setCompMenuPos({ x: comp.x + mod.size.w + 5, y: comp.y, compId: comp.id });
-                      setSelectedCompId(comp.id);
-                      setWireMenuPos(null);
+                      setSelectedCompId(comp.id); setWireMenuPos(null);
                     }}
                     onDragMove={(e) => { e.target.x(snap(e.target.x())); e.target.y(snap(e.target.y())); }}
                     onDragEnd={(e) => { e.cancelBubble = true; updatePosition(comp.id, e.target.x(), e.target.y()); }}>
-                    
+
+                    {isSelected && <Rect x={-4} y={-4} width={mod.size.w + 8} height={mod.size.h + 8} stroke="#f1c40f" strokeWidth={2} dash={[6, 4]} cornerRadius={6} listening={false} />}
                     {glow > 0 ? <Circle x={mod.size.w/2} y={mod.size.h/2} radius={50} fill="yellow" opacity={glow * 0.8} listening={false} /> : null}
 
-                    {/* ВЫКЛЮЧАТЕЛИ */}
                     {isSwitch ? (() => {
                       const keys = comp.deviceId === 'switch_1' ? 1 : comp.deviceId === 'switch_2' ? 2 : 3;
                       const totalCurrent = simResult?.componentCurrents?.get(comp.id) || 0;
                       const isWarning = totalCurrent > 10;
                       const segW = (mod.size.w - 10) / keys;
-
                       return (
                         <Group>
                           <Rect width={mod.size.w} height={mod.size.h} fill="#d8d8d8" stroke="#555" strokeWidth={2} cornerRadius={4} />
                           <Rect x={5} y={5} width={mod.size.w - 10} height={mod.size.h - 10} fill="#f5f5f5" stroke="#333" strokeWidth={1} cornerRadius={2} />
-                          
                           {Array.from({ length: keys }).map((_, k) => {
                             const isClosed = comp.params['closed' + (k + 1)] === true;
-                            
-                            let ledColor = '#e74c3c';
-                            let ledGlow = false;
-                            if (!isClosed) {
-                              ledColor = '#e74c3c';
-                              ledGlow = true;
-                            } else if (totalCurrent > 0.01) {
-                              ledColor = '#2ecc71';
-                              ledGlow = true;
-                            } else {
-                              ledColor = '#f1c40f';
-                              ledGlow = true;
-                            }
-                            
+                            let ledColor = '#e74c3c', ledGlow = true;
+                            if (!isClosed) { ledColor = '#e74c3c'; ledGlow = true; }
+                            else if (totalCurrent > 0.01) { ledColor = '#2ecc71'; ledGlow = true; }
+                            else { ledColor = '#f1c40f'; ledGlow = true; }
                             return (
                               <Group key={k} x={5 + segW * k} y={5}>
-                                <Rect
-                                  width={segW - 2}
-                                  height={mod.size.h - 10}
-                                  fill={isClosed ? '#ffffff' : '#b8b8b8'}
-                                  stroke="#333"
-                                  strokeWidth={1}
-                                  cornerRadius={2}
-                                  onClick={(e) => {
-                                    e.cancelBubble = true;
-                                    updateComponentParam(comp.id, 'closed' + (k + 1), !isClosed);
-                                  }}
-                                />
-                                {/* Светодиод внизу клавиши, поверх всего */}
+                                <Rect width={segW - 2} height={mod.size.h - 10} fill={isClosed ? '#ffffff' : '#b8b8b8'} stroke="#333" strokeWidth={1} cornerRadius={2}
+                                  onClick={(e) => { e.cancelBubble = true; updateComponentParam(comp.id, 'closed' + (k + 1), !isClosed); }} />
                                 <Group x={segW / 2 - 1} y={mod.size.h - 22} listening={false}>
-                                  {ledGlow ? (
-                                    <Circle radius={14} fill={ledColor} opacity={0.35} listening={false} />
-                                  ) : null}
+                                  {ledGlow ? <Circle radius={14} fill={ledColor} opacity={0.35} listening={false} /> : null}
                                   <Circle radius={6} fill={ledColor} stroke="#111" strokeWidth={1.5} listening={false} />
                                   <Circle x={-1.5} y={-1.5} radius={1.8} fill="#fff" opacity={0.8} listening={false} />
                                 </Group>
                               </Group>
                             );
                           })}
-                          
                           {isWarning ? (
                             <Group x={mod.size.w - 10} y={10} listening={false}>
                               <Circle radius={8} fill="#e74c3c" stroke="#fff" strokeWidth={1.5} />
@@ -479,7 +596,6 @@ function App() {
                       );
                     })() : null}
 
-                    {/* АВТОМАТЫ */}
                     {isBreaker ? (() => {
                       const poles = topPins.length > 0 ? topPins.length : 1;
                       return (
@@ -487,15 +603,10 @@ function App() {
                           <Rect width={mod.size.w} height={mod.size.h} fill="#e8e8e8" stroke="#555" strokeWidth={2} cornerRadius={3} />
                           {Array.from({ length: poles }).map((_, i) => {
                             const segW = mod.size.w / poles;
-                            const toggleW = segW - 10;
-                            const toggleH = 36;
-                            const handleH = 16;
+                            const toggleW = segW - 10, toggleH = 36, handleH = 16;
                             const toggleY = mod.size.h / 2 - toggleH / 2;
                             const handleY = isTripped ? toggleY + toggleH - handleH - 2 : toggleY + 2;
-                            const onClick = (e: any) => {
-                              e.cancelBubble = true;
-                              updateComponentParam(comp.id, 'tripped', !comp.params.tripped);
-                            };
+                            const onClick = (e: any) => { e.cancelBubble = true; updateComponentParam(comp.id, 'tripped', !comp.params.tripped); };
                             return (
                               <Group key={i}>
                                 <Rect x={segW * i + 5} y={toggleY} width={toggleW} height={toggleH} fill="#1a1a1a" stroke="#000" strokeWidth={1} cornerRadius={2} onClick={onClick} />
@@ -509,17 +620,11 @@ function App() {
                       );
                     })() : null}
 
-                    {/* ОБЫЧНЫЕ УСТРОЙСТВА (imgSrc / цветной прямоугольник) */}
                     {!isSwitch && !isBreaker ? (
-                      imgSrc ? (
-                        <DeviceImage src={imgSrc} x={0} y={0} width={mod.size.w} height={mod.size.h} />
-                      ) : (
-                        <Rect width={mod.size.w} height={mod.size.h} fill={visual?.tint || '#2a6'} cornerRadius={4} />
-                      )
+                      imgSrc ? <DeviceImage src={imgSrc} x={0} y={0} width={mod.size.w} height={mod.size.h} /> : <Rect width={mod.size.w} height={mod.size.h} fill={visual?.tint || '#2a6'} cornerRadius={4} />
                     ) : null}
 
                     {spinning === true ? <Arc x={mod.size.w/2} y={mod.size.h/2} innerRadius={10} outerRadius={25} angle={90} rotation={rotation} fill="#f1c40f" opacity={0.8} listening={false} /> : null}
-
                     {visual?.warning && !isSwitch && !isBreaker ? (
                       <Group x={mod.size.w - 8} y={8} listening={false}>
                         <Circle radius={9} fill="#e74c3c" stroke="#fff" strokeWidth={1.5} />
@@ -528,34 +633,20 @@ function App() {
                     ) : null}
 
                     {!isBreaker && visual?.label && visual.label.length > 0 ? (
-                      <Text
-                        text={visual.label}
-                        x={0}
-                        y={comp.deviceId === 'led_strip' ? mod.size.h - 14 : mod.size.h/2 - 5}
-                        width={mod.size.w}
-                        align="center"
-                        fill="#fff"
-                        fontSize={comp.deviceId === 'led_strip' ? 10 : 11}
-                        fontStyle="bold"
-                        listening={false}
-                      />
+                      <Text text={visual.label} x={0} y={comp.deviceId === 'led_strip' ? mod.size.h - 14 : mod.size.h/2 - 5} width={mod.size.w} align="center" fill="#fff" fontSize={comp.deviceId === 'led_strip' ? 10 : 11} fontStyle="bold" listening={false} />
                     ) : null}
 
                     {leftPins.map((pin: any, idx: number) => (
-                      <Circle key={pin.id} x={0} y={20 + idx * 15} radius={7} fill={activePin?.compId === comp.id && activePin?.pinId === pin.id ? '#f1c40f' : pin.color} stroke="#000" 
-                        onClick={(e) => { const pos = getPinPos(comp.id, pin.id); if (pos) handlePinClick(comp.id, pin.id, pos.x, pos.y, e); }} />
+                      <Circle key={pin.id} x={0} y={20 + idx * 15} radius={7} fill={activePin?.compId === comp.id && activePin?.pinId === pin.id ? '#f1c40f' : pin.color} stroke="#000" onClick={(e) => { const pos = getPinPos(comp.id, pin.id); if (pos) handlePinClick(comp.id, pin.id, pos.x, pos.y, e); }} />
                     ))}
                     {rightPins.map((pin: any, idx: number) => (
-                      <Circle key={pin.id} x={mod.size.w} y={20 + idx * 15} radius={7} fill={activePin?.compId === comp.id && activePin?.pinId === pin.id ? '#f1c40f' : pin.color} stroke="#000" 
-                        onClick={(e) => { const pos = getPinPos(comp.id, pin.id); if (pos) handlePinClick(comp.id, pin.id, pos.x, pos.y, e); }} />
+                      <Circle key={pin.id} x={mod.size.w} y={20 + idx * 15} radius={7} fill={activePin?.compId === comp.id && activePin?.pinId === pin.id ? '#f1c40f' : pin.color} stroke="#000" onClick={(e) => { const pos = getPinPos(comp.id, pin.id); if (pos) handlePinClick(comp.id, pin.id, pos.x, pos.y, e); }} />
                     ))}
                     {topPins.map((pin: any, idx: number) => (
-                      <Circle key={pin.id} x={mod.size.w * (idx + 1) / (topPins.length + 1)} y={0} radius={7} fill={activePin?.compId === comp.id && activePin?.pinId === pin.id ? '#f1c40f' : pin.color} stroke="#000" 
-                        onClick={(e) => { const pos = getPinPos(comp.id, pin.id); if (pos) handlePinClick(comp.id, pin.id, pos.x, pos.y, e); }} />
+                      <Circle key={pin.id} x={mod.size.w * (idx + 1) / (topPins.length + 1)} y={0} radius={7} fill={activePin?.compId === comp.id && activePin?.pinId === pin.id ? '#f1c40f' : pin.color} stroke="#000" onClick={(e) => { const pos = getPinPos(comp.id, pin.id); if (pos) handlePinClick(comp.id, pin.id, pos.x, pos.y, e); }} />
                     ))}
                     {bottomPins.map((pin: any, idx: number) => (
-                      <Circle key={pin.id} x={mod.size.w * (idx + 1) / (bottomPins.length + 1)} y={mod.size.h} radius={7} fill={activePin?.compId === comp.id && activePin?.pinId === pin.id ? '#f1c40f' : pin.color} stroke="#000" 
-                        onClick={(e) => { const pos = getPinPos(comp.id, pin.id); if (pos) handlePinClick(comp.id, pin.id, pos.x, pos.y, e); }} />
+                      <Circle key={pin.id} x={mod.size.w * (idx + 1) / (bottomPins.length + 1)} y={mod.size.h} radius={7} fill={activePin?.compId === comp.id && activePin?.pinId === pin.id ? '#f1c40f' : pin.color} stroke="#000" onClick={(e) => { const pos = getPinPos(comp.id, pin.id); if (pos) handlePinClick(comp.id, pin.id, pos.x, pos.y, e); }} />
                     ))}
                   </Group>
                 );
@@ -563,6 +654,8 @@ function App() {
 
               {probeA !== null ? <Circle x={probeA.x} y={probeA.y} radius={10} stroke="#00ff00" strokeWidth={3} listening={false} /> : null}
               {probeB !== null ? <Circle x={probeB.x} y={probeB.y} radius={10} stroke="#00ff00" strokeWidth={3} listening={false} /> : null}
+
+              {selStart && selEnd ? <Rect x={Math.min(selStart.x, selEnd.x)} y={Math.min(selStart.y, selEnd.y)} width={Math.abs(selEnd.x - selStart.x)} height={Math.abs(selEnd.y - selStart.y)} fill="rgba(241,196,15,0.15)" stroke="#f1c40f" strokeWidth={1} listening={false} /> : null}
             </Layer>
           </Stage>
 
@@ -579,17 +672,26 @@ function App() {
             </div>
           ) : null}
 
-          {wireMenuPos && selectedWireId ? (
-            <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute', left: wireMenuPos.x, top: wireMenuPos.y, background: '#333', border: '1px solid #555', borderRadius: '6px', padding: '10px', zIndex: 100, display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <div style={{ color: '#fff', fontSize: '12px' }}>Провод</div>
-              <div style={{ display: 'flex', gap: '5px' }}>{['#3498db', '#e74c3c', '#f1c40f', '#2ecc71'].map(c => <div key={c} onClick={() => { setWireColor(selectedWireId, c); setWireMenuPos(null); }} style={{ width: '20px', height: '20px', background: c, cursor: 'pointer', borderRadius: '3px' }} />)}</div>
-              <button onClick={() => { removeWire(selectedWireId); setWireMenuPos(null); }} style={{ background: '#c0392b', color: '#fff', border: 'none', padding: '4px 8px', cursor: 'pointer', fontSize: '10px' }}>Удалить</button>
-            </div>
-          ) : null}
+          {wireMenuPos && selectedWireId ? (() => {
+            const w = wires.find(x => x.id === selectedWireId); if (!w) return null;
+            const cable = getCableById(w.cableId || '');
+            return (
+              <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute', left: wireMenuPos.x, top: wireMenuPos.y, background: '#333', border: '1px solid #555', borderRadius: '6px', padding: '10px', zIndex: 100, display: 'flex', flexDirection: 'column', gap: '8px', minWidth: '220px' }}>
+                <div style={{ color: '#fff', fontSize: '12px' }}>Провод</div>
+                <div style={{ color: '#ccc', fontSize: '11px' }}>{cable ? cable.display : 'Сечение: ' + (w.crossSection || 2.5) + ' мм²'}</div>
+                <div style={{ display: 'flex', gap: '5px' }}>{['#3498db', '#e74c3c', '#f1c40f', '#2ecc71'].map(c => <div key={c} onClick={() => { setWireColor(selectedWireId, c); setWireMenuPos(null); }} style={{ width: '20px', height: '20px', background: c, cursor: 'pointer', borderRadius: '3px' }} />)}</div>
+                <label style={{ fontSize: '11px', color: '#ccc' }}>Длина (м):</label>
+                <input type="number" value={w.length || 1} onChange={(e) => updateWire(selectedWireId, { length: Number(e.target.value) })} style={{ width: '100%', padding: '4px', background: '#222', color: '#fff', border: '1px solid #555', borderRadius: '3px' }} />
+                {selectedCable && (
+                  <button onClick={() => { applyCableToWires([selectedWireId], selectedCable); setWireMenuPos(null); }} style={{ background: '#2ecc71', color: '#fff', border: 'none', padding: '5px', cursor: 'pointer', borderRadius: '3px', fontSize: '11px' }}>Применить {selectedCable.display}</button>
+                )}
+                <button onClick={() => { removeWire(selectedWireId); setWireMenuPos(null); }} style={{ background: '#c0392b', color: '#fff', border: 'none', padding: '4px 8px', cursor: 'pointer', fontSize: '10px', borderRadius: '3px' }}>Удалить провод</button>
+              </div>
+            );
+          })() : null}
 
           {selectedCompId !== null ? (() => {
-            const comp = components.find(c => c.id === selectedCompId);
-            if (!comp) return null;
+            const comp = components.find(c => c.id === selectedCompId); if (!comp) return null;
             const mod = registry.get(comp.deviceId);
             return (
               <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute', right: '20px', top: '20px', background: '#252526', border: '1px solid #444', padding: '12px', borderRadius: '8px', color: '#fff', zIndex: 100, minWidth: '200px' }}>
@@ -599,12 +701,23 @@ function App() {
               </div>
             );
           })() : null}
+
+          {showProblems ? (
+            <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute', right: '20px', bottom: '20px', background: '#252526', border: '1px solid #f39c12', padding: '10px', borderRadius: '6px', color: '#fff', zIndex: 100, width: '360px', maxHeight: '300px', overflowY: 'auto' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <b style={{ color: '#f39c12', fontSize: '13px' }}>Проблемы ПУЭ ({problems.length})</b>
+                <button onClick={() => setShowProblems(false)} style={{ background: 'transparent', border: 'none', color: '#888', cursor: 'pointer', fontSize: '16px' }}>×</button>
+              </div>
+              {problems.length === 0 ? <div style={{ color: '#888', fontSize: '11px' }}>Нет проблем</div> :
+                problems.map((p, i) => <div key={i} style={{ fontSize: '11px', color: '#f39c12', marginBottom: '4px' }}>{p}</div>)}
+            </div>
+          ) : null}
         </div>
       </div>
-      
+
       <div className="logs">
         <h4 style={{ marginBottom: '5px', fontSize: '12px' }}>События:</h4>
-        {logs.map((log, i) => <div key={i} className="log-entry" style={{ color: log.startsWith('[ПУЭ]') ? '#f39c12' : undefined }}>{log}</div>)}
+        {logs.filter(l => !l.startsWith('[ПУЭ]')).map((log, i) => <div key={i} className="log-entry">{log}</div>)}
       </div>
     </div>
   );
