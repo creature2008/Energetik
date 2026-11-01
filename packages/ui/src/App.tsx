@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { Stage, Layer, Rect, Group, Circle, Line, Image as KonvaImage, Text, Arc } from 'react-konva';
 import { runSimulation, measure, registry, lintProtection } from '@electro/core';
 import { registerAllMods } from '@electro/mods';
@@ -26,6 +26,7 @@ function App() {
   const [logs, setLogs] = useState<string[]>(['[Система] Приложение запущено.']);
   const [selectedWireId, setSelectedWireId] = useState<string | null>(null);
   const [wireMenuPos, setWireMenuPos] = useState<{x: number, y: number} | null>(null);
+  const [compMenuPos, setCompMenuPos] = useState<{x: number, y: number, compId: string} | null>(null);
   const [selectedCompId, setSelectedCompId] = useState<string | null>(null);
   const [simResult, setSimResult] = useState<any>(null);
   const [isPaused, setIsPaused] = useState(false);
@@ -33,18 +34,17 @@ function App() {
   
   const [probeA, setProbeA] = useState<ProbePoint | null>(null);
   const [probeB, setProbeB] = useState<ProbePoint | null>(null);
-  const [measureResult, setMeasureResult] = useState<{ x: number, y: number, text: string, type: 'volt' | 'amp' } | null>(null);
+  const [measureResult, setMeasureResult] = useState<{ x: number, y: number, text: string } | null>(null);
   const [isAltPressed, setIsAltPressed] = useState(false);
   const [isCtrlPressed, setIsCtrlPressed] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [openCategories, setOpenCategories] = useState<string[]>(['power']);
 
-  // Состояние для бесконечной сетки
   const [stagePos, setStagePos] = useState({ x: 0, y: 0 });
   const [stageScale, setStageScale] = useState(1);
 
-  const { components, wires, addComponent, updatePosition, activePin, setActivePin, addWire, removeWire, updateComponentParam, insertWaypoint, updateWaypoint, removeWaypoint, setWireColor } = useStore();
+  const { components, wires, addComponent, updatePosition, activePin, setActivePin, addWire, removeWire, updateComponentParam, removeComponent, insertWaypoint, updateWaypoint, removeWaypoint, setWireColor } = useStore();
 
   const addLog = (msg: string) => setLogs(prev => [...prev, msg]);
 
@@ -68,13 +68,16 @@ function App() {
       if (newA && newB) {
         const r = measure(simResult, newA, newB);
         let text = 'OL';
-        if (r.kind === 'ok') text = r.volts.toFixed(2) + ' В';
+        if (r.kind === 'ok') {
+          const suffix = r.isAC ? ' В ~' + r.freq + 'Гц' : ' В DC';
+          text = r.volts.toFixed(2) + suffix;
+        }
         else if (r.kind === 'isolated') text = 'OL (разные цепи)';
         const pos = e.target.getStage()?.getPointerPosition();
-        if (pos) setMeasureResult({ x: pos.x, y: pos.y - 40, text, type: 'volt' });
+        if (pos) setMeasureResult({ x: pos.x, y: pos.y - 40, text });
       } else {
         const pos = e.target.getStage()?.getPointerPosition();
-        if (pos) setMeasureResult({ x: pos.x, y: pos.y - 40, text: 'Выберите 2-ю точку', type: 'volt' });
+        if (pos) setMeasureResult({ x: pos.x, y: pos.y - 40, text: 'Выберите 2-ю точку' });
       }
       return;
     }
@@ -107,7 +110,7 @@ function App() {
       const curB = simResult?.componentCurrents?.get(wire.to.compId) || 0;
       const current = Math.max(curA, curB);
       const pos = e.target.getStage()?.getPointerPosition();
-      if (pos) setMeasureResult({ x: pos.x, y: pos.y - 40, text: current.toFixed(3) + ' А', type: 'amp' });
+      if (pos) setMeasureResult({ x: pos.x, y: pos.y - 40, text: current.toFixed(3) + ' А' });
       return;
     }
     e.cancelBubble = true; 
@@ -191,30 +194,28 @@ function App() {
     const down = (e: KeyboardEvent) => {
       if (e.key === 'Alt') setIsAltPressed(true);
       if (e.key === 'Control') setIsCtrlPressed(true);
+      if (e.key === 'Delete' && selectedCompId) {
+        removeComponent(selectedCompId);
+        setSelectedCompId(null);
+      }
     };
     const up = (e: KeyboardEvent) => {
-      if (e.key === 'Alt') { setIsAltPressed(false); if (measureResult?.type === 'amp') setMeasureResult(null); }
-      if (e.key === 'Control') { setIsCtrlPressed(false); if (measureResult?.type === 'volt') setMeasureResult(null); setProbeA(null); setProbeB(null); }
+      if (e.key === 'Alt') { setIsAltPressed(false); setMeasureResult(null); }
+      if (e.key === 'Control') { setIsCtrlPressed(false); setMeasureResult(null); setProbeA(null); setProbeB(null); }
     };
     window.addEventListener('keydown', down);
     window.addEventListener('keyup', up);
     return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); };
-  }, [measureResult]);
+  }, [measureResult, selectedCompId, removeComponent]);
 
-  // Рендер бесконечной сетки
   const renderGrid = (width: number, height: number) => {
     const lines = [];
     const startX = Math.floor((-stagePos.x / stageScale) / GRID_SIZE) * GRID_SIZE;
     const endX = Math.ceil(((width - stagePos.x) / stageScale) / GRID_SIZE) * GRID_SIZE;
     const startY = Math.floor((-stagePos.y / stageScale) / GRID_SIZE) * GRID_SIZE;
     const endY = Math.ceil(((height - stagePos.y) / stageScale) / GRID_SIZE) * GRID_SIZE;
-
-    for (let i = startX; i < endX; i += GRID_SIZE) {
-      lines.push(<Line key={'v'+i} points={[i, startY, i, endY]} stroke="#333" strokeWidth={1 / stageScale} />);
-    }
-    for (let i = startY; i < endY; i += GRID_SIZE) {
-      lines.push(<Line key={'h'+i} points={[startX, i, endX, i]} stroke="#333" strokeWidth={1 / stageScale} />);
-    }
+    for (let i = startX; i < endX; i += GRID_SIZE) lines.push(<Line key={'v'+i} points={[i, startY, i, endY]} stroke="#333" strokeWidth={1 / stageScale} />);
+    for (let i = startY; i < endY; i += GRID_SIZE) lines.push(<Line key={'h'+i} points={[startX, i, endX, i]} stroke="#333" strokeWidth={1 / stageScale} />);
     return lines;
   };
 
@@ -251,8 +252,6 @@ function App() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', width: '100vw', height: '100vh' }}>
-      
-      {/* ВЕРХНЯЯ ПАНЕЛЬ С КНОПКАМИ */}
       <div className="topbar">
         <div className="topbar-title">⚡ Electro Studio</div>
         <div className="topbar-actions">
@@ -283,7 +282,7 @@ function App() {
           ))}
         </div>
         
-        <div className="canvas-area" onClick={() => { setWireMenuPos(null); setSelectedCompId(null); }}>
+        <div className="canvas-area" onClick={() => { setWireMenuPos(null); setSelectedCompId(null); setCompMenuPos(null); }}>
           <Stage 
             width={window.innerWidth - 220} 
             height={window.innerHeight - 40 - 140} 
@@ -345,7 +344,14 @@ function App() {
 
                 return (
                   <Group key={comp.id} x={comp.x} y={comp.y} draggable
-                    onClick={(e) => { e.cancelBubble = true; setSelectedCompId(comp.id); setWireMenuPos(null); }}
+                    onClick={(e) => { e.cancelBubble = true; setSelectedCompId(comp.id); setWireMenuPos(null); setCompMenuPos(null); }}
+                    onContextMenu={(e) => {
+                      e.evt.preventDefault();
+                      e.cancelBubble = true;
+                      setCompMenuPos({ x: comp.x + mod.size.w + 5, y: comp.y, compId: comp.id });
+                      setSelectedCompId(comp.id);
+                      setWireMenuPos(null);
+                    }}
                     onDragMove={(e) => { e.target.x(snap(e.target.x())); e.target.y(snap(e.target.y())); }}
                     onDragEnd={(e) => { e.cancelBubble = true; updatePosition(comp.id, e.target.x(), e.target.y()); }}>
                     
@@ -359,11 +365,7 @@ function App() {
                     ) : null}
 
                     {isBreaker ? (
-                      <Text 
-                        text={(comp.params.curve || 'C') + (comp.params.ratedCurrent || 16)} 
-                        x={0} y={mod.size.h - 15} width={mod.size.w} align="center"
-                        fill="#000" fontSize={12} fontStyle="bold" 
-                      />
+                      <Text text={(comp.params.curve || 'C') + (comp.params.ratedCurrent || 16)} x={0} y={mod.size.h - 15} width={mod.size.w} align="center" fill="#000" fontSize={12} fontStyle="bold" />
                     ) : null}
 
                     {breakerColor ? <Circle x={mod.size.w - 8} y={8} radius={5} fill={breakerColor} stroke="#000" strokeWidth={1} /> : null}
@@ -388,6 +390,13 @@ function App() {
           {measureResult !== null ? (
             <div style={{ position: 'absolute', left: measureResult.x, top: measureResult.y, background: '#000', color: '#00ff00', padding: '5px 10px', borderRadius: '4px', border: '1px solid #00ff00', fontSize: '14px', fontWeight: 'bold', pointerEvents: 'none', zIndex: 1000 }}>
               {measureResult.text}
+            </div>
+          ) : null}
+
+          {compMenuPos ? (
+            <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute', left: compMenuPos.x, top: compMenuPos.y, background: '#333', border: '1px solid #555', borderRadius: '6px', padding: '8px', zIndex: 100, display: 'flex', flexDirection: 'column', gap: '5px' }}>
+              <button onClick={() => { removeComponent(compMenuPos.compId); setCompMenuPos(null); setSelectedCompId(null); }} style={{ background: '#c0392b', color: '#fff', border: 'none', padding: '6px 14px', cursor: 'pointer', fontSize: '12px', borderRadius: '3px' }}>🗑 Удалить</button>
+              <button onClick={() => setCompMenuPos(null)} style={{ background: '#555', color: '#fff', border: 'none', padding: '4px 8px', cursor: 'pointer', fontSize: '11px', borderRadius: '3px' }}>Отмена</button>
             </div>
           ) : null}
 

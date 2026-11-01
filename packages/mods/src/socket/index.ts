@@ -10,6 +10,6 @@ export const socket: DeviceMod = {
   stamp({ node }) {
     const a = node('L'), b = node('N');
     if (a == null || b == null) return [];
-    return [{ type: 'resistor', nodeA: a, nodeB: b, resistance: 1000 }];
+    return [{ type: 'resistor', nodeA: a, nodeB: b, R: 1000 }];
   },
 };

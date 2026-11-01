@@ -1,4 +1,4 @@
-﻿import { Project } from './types';
+import { Project } from './types';
 import { registry } from './registry';
 import type { SimEvent } from './mod-api';
 
@@ -28,8 +28,9 @@ export function lintProtection(project: Project): SimEvent[] {
     }
   }
 
-  const source = project.components.find(c => c.deviceId === 'supply');
-  if (!source) return events;
+  const sources = project.components.filter(c => c.deviceId === 'supply' || c.deviceId === 'supply_3ph' || c.deviceId === 'supply_us_2ph');
+  if (sources.length === 0) return events;
+  const source = sources[0];
 
   // BFS от клеммы мотора: находим все автоматы вплоть до источника,
   // но НЕ проходим сквозь них (автомат = граница защиты).

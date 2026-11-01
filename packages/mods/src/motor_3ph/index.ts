@@ -13,12 +13,17 @@ export const motor_3ph: DeviceMod = {
     { key: 'startupMultiplier', label: 'Пусковой ток (×ном.)', type: 'number', default: 7 },
   ],
   stamp({ comp, node }) {
-    const a = node('L1'), b = node('N');
-    if (a == null || b == null) return [];
-    return [{ type: 'resistor', nodeA: a, nodeB: b, resistance: (380 * 380) / comp.params.power }];
+    const R = (220 * 220) / (comp.params.power / 3);
+    const els = [];
+    const nN = node('N');
+    for (const ph of ['L1', 'L2', 'L3']) {
+      const nPh = node(ph);
+      if (nPh != null && nN != null) els.push({ type: 'resistor', nodeA: nPh, nodeB: nN, R });
+    }
+    return els;
   },
-  evaluate({ comp, volts }) {
-    const dv = Math.abs(volts('L1', 'N'));
-    return { visual: { spinning: dv > 50, label: 'M 3~' } };
+  evaluate({ volts }) {
+    const avg = (Math.abs(volts('L1', 'N')) + Math.abs(volts('L2', 'N')) + Math.abs(volts('L3', 'N'))) / 3;
+    return { visual: { spinning: avg > 50, label: 'M 3~' } };
   },
 };

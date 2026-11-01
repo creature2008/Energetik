@@ -1,5 +1,7 @@
 ﻿import { registry } from '@electro/core';
 import { supply } from './supply';
+import { supply_3ph } from './supply_3ph';
+import { supply_us_2ph } from './supply_us_2ph';
 import { lamp } from './lamp';
 import { breaker } from './breaker';
 import { switchMod } from './switch';
@@ -11,6 +13,8 @@ import { terminal } from './terminal';
 
 export function registerAllMods() {
   registry.register(supply);
+  registry.register(supply_3ph);
+  registry.register(supply_us_2ph);
   registry.register(lamp);
   registry.register(breaker);
   registry.register(switchMod);

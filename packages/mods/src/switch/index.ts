@@ -6,13 +6,11 @@ export const switchMod: DeviceMod = {
     { id: 'L', label: 'L', side: 'left', color: '#fff' },
     { id: 'N', label: 'N', side: 'right', color: '#3498db' },
   ],
-  params: [
-    { key: 'closed', label: 'Замкнут', type: 'boolean', default: false },
-  ],
+  params: [{ key: 'closed', label: 'Замкнут', type: 'boolean', default: false }],
   stamp({ comp, node }) {
     if (!comp.params.closed) return [];
     const a = node('L'), b = node('N');
     if (a == null || b == null) return [];
-    return [{ type: 'resistor', nodeA: a, nodeB: b, resistance: 0.001 }];
+    return [{ type: 'resistor', nodeA: a, nodeB: b, R: 0.001 }];
   },
 };

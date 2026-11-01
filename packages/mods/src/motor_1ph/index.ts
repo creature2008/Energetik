@@ -13,10 +13,9 @@ export const motor_1ph: DeviceMod = {
   stamp({ comp, node }) {
     const a = node('L'), b = node('N');
     if (a == null || b == null) return [];
-    return [{ type: 'resistor', nodeA: a, nodeB: b, resistance: (220 * 220) / comp.params.power }];
+    return [{ type: 'resistor', nodeA: a, nodeB: b, R: (220 * 220) / comp.params.power }];
   },
-  evaluate({ comp, volts }) {
-    const dv = Math.abs(volts('L', 'N'));
-    return { visual: { spinning: dv > 50, label: 'M 1~' } };
+  evaluate({ volts }) {
+    return { visual: { spinning: Math.abs(volts('L', 'N')) > 50, label: 'M 1~' } };
   },
 };

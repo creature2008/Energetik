@@ -1,4 +1,5 @@
-﻿import type { MnaElement } from './sim/mna';
+export type { MnaElement } from './sim/mna';
+import type { MnaElement } from './sim/mna';
 
 export type PinDef = { id: string; label: string; side: 'left' | 'right'; color?: string };
 

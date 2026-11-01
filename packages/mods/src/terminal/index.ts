@@ -12,8 +12,8 @@ export const terminal: DeviceMod = {
   stamp({ node }) {
     const els = [];
     const n1 = node('1'), n2 = node('2'), n3 = node('3'), n4 = node('4');
-    if (n1 != null && n2 != null) els.push({ type: 'resistor', nodeA: n1, nodeB: n2, resistance: 0.001 });
-    if (n3 != null && n4 != null) els.push({ type: 'resistor', nodeA: n3, nodeB: n4, resistance: 0.001 });
+    if (n1 != null && n2 != null) els.push({ type: 'resistor', nodeA: n1, nodeB: n2, R: 0.001 });
+    if (n3 != null && n4 != null) els.push({ type: 'resistor', nodeA: n3, nodeB: n4, R: 0.001 });
     return els;
   },
 };

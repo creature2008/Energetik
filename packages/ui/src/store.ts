@@ -13,6 +13,7 @@ type UIState = {
   addWire: (from: PinRef, to: PinRef) => void;
   removeWire: (wireId: string) => void;
   updateComponentParam: (compId: string, key: string, value: any) => void;
+  removeComponent: (compId: string) => void;
   insertWaypoint: (wireId: string, x: number, y: number, index: number) => void;
   updateWaypoint: (wireId: string, index: number, x: number, y: number) => void;
   removeWaypoint: (wireId: string, index: number) => void;
@@ -45,13 +46,16 @@ export const useStore = create<UIState>((set) => ({
   updateComponentParam: (compId, key, value) => set((state) => ({
     components: state.components.map(c => c.id !== compId ? c : { ...c, params: { ...c.params, [key]: value } })
   })),
+  removeComponent: (compId) => set((state) => ({
+    components: state.components.filter(c => c.id !== compId),
+    wires: state.wires.filter(w => w.from.compId !== compId && w.to.compId !== compId),
+  })),
   insertWaypoint: (wireId, x, y, index) => set((state) => ({ wires: state.wires.map(w => { if (w.id !== wireId) return w; const n = [...w.waypoints]; n.splice(index, 0, {x,y}); return {...w, waypoints: n}; }) })),
   updateWaypoint: (wireId, index, x, y) => set((state) => ({ wires: state.wires.map(w => { if (w.id !== wireId) return w; const n = [...w.waypoints]; n[index] = {x,y}; return {...w, waypoints: n}; }) })),
   removeWaypoint: (wireId, index) => set((state) => ({ wires: state.wires.map(w => { if (w.id !== wireId) return w; return {...w, waypoints: w.waypoints.filter((_, i) => i !== index)}; }) })),
   setWireColor: (wireId, color) => set((state) => ({ wires: state.wires.map(w => w.id === wireId ? { ...w, color } : w) })),
 }));
 
-/** Дополняет params и pins загруженного компонента дефолтами из мода */
 function hydrateComponent(comp: any): any {
   const mod = registry.get(comp.deviceId);
   if (!mod) return comp;

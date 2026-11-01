@@ -18,14 +18,11 @@ export const breaker: DeviceMod = {
   stamp({ comp, node }) {
     const a = node('L'), b = node('N');
     if (a == null || b == null) return [];
-    return [{ type: 'resistor', nodeA: a, nodeB: b, resistance: comp.params.tripped ? 1e9 : 0.001 }];
+    return [{ type: 'resistor', nodeA: a, nodeB: b, R: comp.params.tripped ? 1e9 : 0.001 }];
   },
   evaluate({ comp, current }) {
     if (!comp.params.tripped && current > comp.params.ratedCurrent * 1.15) {
-      return {
-        setParams: { tripped: true },
-        events: [{ type: 'tripped', message: 'Автомат ' + comp.id + ' выбило (ток ' + current.toFixed(2) + 'А > ' + (comp.params.ratedCurrent * 1.15).toFixed(1) + 'А)', target: { compId: comp.id } }],
-      };
+      return { events: [{ type: 'tripped', message: 'Автомат ' + comp.id + ' выбило (ток ' + current.toFixed(2) + 'А)', target: { compId: comp.id } }] };
     }
     return {};
   },

@@ -1,134 +1,178 @@
-﻿export type MnaElement = {
-  type: 'resistor' | 'voltageSource';
-  nodeA: number;
-  nodeB: number;
-  resistance?: number;
-  voltage?: number;
-  tag?: string;
-};
+﻿export type MnaElement =
+  | { type: 'resistor'; nodeA: number; nodeB: number; R: number; tag?: string }
+  | { type: 'voltageSource'; nodeA: number; nodeB: number; rms: number; phaseDeg?: number; freq: number; tag?: string };
 
 export type MnaResult = {
-  voltages: number[];
-  currents: number[];
-  islandOf: number[];
+  vRe: Float64Array;
+  vIm: Float64Array;
+  iRe: Float64Array;
+  iIm: Float64Array;
+  islandOf: Int32Array;
+  islandFreq: number[];
 };
 
-export function solveMna(nodeCount: number, elements: MnaElement[], groundIdx: number = -1): MnaResult {
-  const voltageSources = elements.filter(e => e.type === 'voltageSource');
-  const n = nodeCount + voltageSources.length;
+export const mag = (re: number, im: number) => Math.hypot(re, im);
 
-  const A: number[][] = Array.from({ length: n }, () => new Array(n).fill(0));
-  const b: number[] = new Array(n).fill(0);
-  let vsIndex = 0;
-  const vsRowMap = new Map<number, number>();
+const EPS = 1e-12;
 
-  elements.forEach((el, idx) => {
-    if (el.type === 'resistor') {
-      const g = 1 / (el.resistance! || 1e-9);
-      if (el.nodeA < nodeCount) A[el.nodeA][el.nodeA] += g;
-      if (el.nodeB < nodeCount) A[el.nodeB][el.nodeB] += g;
-      if (el.nodeA < nodeCount && el.nodeB < nodeCount) {
-        A[el.nodeA][el.nodeB] -= g;
-        A[el.nodeB][el.nodeA] -= g;
+function solveComplex(n: number, Ar: Float64Array, Ai: Float64Array, br: Float64Array, bi: Float64Array) {
+  let scale = 0;
+  for (let k = 0; k < n * n; k++) scale = Math.max(scale, Ar[k] * Ar[k] + Ai[k] * Ai[k]);
+
+  for (let col = 0; col < n; col++) {
+    let piv = col, best = -1;
+    for (let r = col; r < n; r++) {
+      const m = Ar[r * n + col] ** 2 + Ai[r * n + col] ** 2;
+      if (m > best) { best = m; piv = r; }
+    }
+    if (best <= EPS * EPS * Math.max(scale, 1)) continue;
+    if (piv !== col) {
+      for (let c = 0; c < n; c++) {
+        [Ar[col * n + c], Ar[piv * n + c]] = [Ar[piv * n + c], Ar[col * n + c]];
+        [Ai[col * n + c], Ai[piv * n + c]] = [Ai[piv * n + c], Ai[col * n + c]];
       }
-    } else if (el.type === 'voltageSource') {
-      const row = nodeCount + vsIndex;
-      vsRowMap.set(idx, row);
-      vsIndex++;
-      if (el.nodeA < nodeCount) { A[row][el.nodeA] += 1; A[el.nodeA][row] += 1; }
-      if (el.nodeB < nodeCount) { A[row][el.nodeB] -= 1; A[el.nodeB][row] -= 1; }
-      b[row] = el.voltage!;
+      [br[col], br[piv]] = [br[piv], br[col]];
+      [bi[col], bi[piv]] = [bi[piv], bi[col]];
     }
-  });
-
-  if (groundIdx >= 0 && groundIdx < nodeCount) {
-    for (let i = 0; i < n; i++) A[groundIdx][i] = 0;
-    A[groundIdx][groundIdx] = 1;
-    b[groundIdx] = 0;
+    const pr = Ar[col * n + col], pi = Ai[col * n + col], d = pr * pr + pi * pi;
+    if (d < EPS) continue;
+    for (let r = col + 1; r < n; r++) {
+      const ar = Ar[r * n + col], ai = Ai[r * n + col];
+      if (ar === 0 && ai === 0) continue;
+      const fr = (ar * pr + ai * pi) / d, fi = (ai * pr - ar * pi) / d;
+      for (let c = col; c < n; c++) {
+        const xr = Ar[col * n + c], xi = Ai[col * n + c];
+        Ar[r * n + c] -= fr * xr - fi * xi;
+        Ai[r * n + c] -= fr * xi + fi * xr;
+      }
+      br[r] -= fr * br[col] - fi * bi[col];
+      bi[r] -= fr * bi[col] + fi * br[col];
+    }
   }
-
-  const x = gaussianSolve(A, b);
-  const voltages = x.slice(0, nodeCount);
-  const currents: number[] = elements.map((el, idx) => {
-    if (el.type === 'resistor') {
-      const va = voltages[el.nodeA] ?? 0;
-      const vb = voltages[el.nodeB] ?? 0;
-      return (va - vb) / (el.resistance! || 1e-9);
-    } else {
-      const row = vsRowMap.get(idx);
-      return row !== undefined ? x[row] : 0;
+  const xr = new Float64Array(n), xi = new Float64Array(n);
+  for (let r = n - 1; r >= 0; r--) {
+    let sr = br[r], si = bi[r];
+    for (let c = r + 1; c < n; c++) {
+      sr -= Ar[r * n + c] * xr[c] - Ai[r * n + c] * xi[c];
+      si -= Ar[r * n + c] * xi[c] + Ai[r * n + c] * xr[c];
     }
-  });
-
-  return { voltages, currents, islandOf: new Array(nodeCount).fill(0) };
+    const pr = Ar[r * n + r], pi = Ai[r * n + r], d = pr * pr + pi * pi;
+    if (d < EPS) { xr[r] = 0; xi[r] = 0; continue; }
+    xr[r] = (sr * pr + si * pi) / d;
+    xi[r] = (si * pr - sr * pi) / d;
+  }
+  return { xr, xi };
 }
 
-type Island = { nodes: number[]; elems: number[] };
+type Island = { nodes: number[]; elems: number[]; freq: number };
 
 function splitIslands(nodeCount: number, elements: MnaElement[]): Island[] {
   const parent = Array.from({ length: nodeCount }, (_, i) => i);
   const find = (x: number): number => (parent[x] === x ? x : (parent[x] = find(parent[x])));
-  for (const e of elements) {
-    if (e.nodeA !== e.nodeB) parent[find(e.nodeA)] = find(e.nodeB);
-  }
+  for (const e of elements) if (e.nodeA !== e.nodeB) parent[find(e.nodeA)] = find(e.nodeB);
 
   const byRoot = new Map<number, Island>();
   for (let n = 0; n < nodeCount; n++) {
     const r = find(n);
-    if (!byRoot.has(r)) byRoot.set(r, { nodes: [], elems: [] });
+    if (!byRoot.has(r)) byRoot.set(r, { nodes: [], elems: [], freq: 0 });
     byRoot.get(r)!.nodes.push(n);
   }
-  elements.forEach((e, i) => byRoot.get(find(e.nodeA))!.elems.push(i));
+  elements.forEach((e, i) => {
+    const r = find(e.nodeA);
+    const isl = byRoot.get(r)!;
+    isl.elems.push(i);
+    if (e.type === 'voltageSource' && e.freq > 0) isl.freq = e.freq;
+  });
   return Array.from(byRoot.values());
 }
 
 export function solveIslands(nodeCount: number, elements: MnaElement[]): MnaResult {
-  const voltages: number[] = new Array(nodeCount).fill(0);
-  const currents: number[] = new Array(elements.length).fill(0);
-  const islandOf: number[] = new Array(nodeCount).fill(-1);
+  const vRe = new Float64Array(nodeCount);
+  const vIm = new Float64Array(nodeCount);
+  const iRe = new Float64Array(elements.length);
+  const iIm = new Float64Array(elements.length);
+  const islandOf = new Int32Array(nodeCount).fill(-1);
+  const islandFreq: number[] = [];
 
   let k = 0;
   for (const isl of splitIslands(nodeCount, elements)) {
     isl.nodes.forEach(n => (islandOf[n] = k));
+    islandFreq.push(isl.freq);
     k++;
     if (isl.elems.length === 0) continue;
+
     const local = new Map(isl.nodes.map((n, i) => [n, i] as [number, number]));
-    const els = isl.elems.map(i => ({
-      ...elements[i],
-      nodeA: local.get(elements[i].nodeA)!,
-      nodeB: local.get(elements[i].nodeB)!,
-    }));
-    const vs = els.find(e => e.type === 'voltageSource');
-    const ground = vs ? vs.nodeB : 0;
+    const elems = isl.elems.map(i => {
+      const e = elements[i];
+      return { ...e, nodeA: local.get(e.nodeA)!, nodeB: local.get(e.nodeB)!, _gi: i };
+    });
 
-    const r = solveMna(isl.nodes.length, els, ground);
-    isl.nodes.forEach((n, i) => (voltages[n] = r.voltages[i]));
-    isl.elems.forEach((gi, idx) => (currents[gi] = r.currents[idx]));
+    const vsCount = elems.filter(e => e.type === 'voltageSource').length;
+    const n = isl.nodes.length + vsCount;
+    const Ar = new Float64Array(n * n);
+    const Ai = new Float64Array(n * n);
+    const br = new Float64Array(n);
+    const bi = new Float64Array(n);
+
+    let vsIdx = 0;
+    const vsRow = new Map<number, number>();
+
+    elems.forEach((el, idx) => {
+      if (el.type === 'resistor') {
+        const g = 1 / Math.max(el.R, 1e-4);
+        const a = el.nodeA, b = el.nodeB;
+        if (a < isl.nodes.length) Ar[a * n + a] += g;
+        if (b < isl.nodes.length) Ar[b * n + b] += g;
+        if (a < isl.nodes.length && b < isl.nodes.length) {
+          Ar[a * n + b] -= g;
+          Ar[b * n + a] -= g;
+        }
+      } else if (el.type === 'voltageSource') {
+        const row = isl.nodes.length + vsIdx;
+        vsRow.set(el._gi, row);
+        vsIdx++;
+        const a = el.nodeA, b = el.nodeB;
+        if (a < isl.nodes.length) { Ar[row * n + a] += 1; Ar[a * n + row] += 1; }
+        if (b < isl.nodes.length) { Ar[row * n + b] -= 1; Ar[b * n + row] -= 1; }
+        const phaseRad = ((el.phaseDeg || 0) * Math.PI) / 180;
+        br[row] = el.rms * Math.cos(phaseRad);
+        bi[row] = el.rms * Math.sin(phaseRad);
+      }
+    });
+
+    // Земля = nodeB первого источника
+    const vs = elems.find(e => e.type === 'voltageSource');
+    if (vs) {
+      const ground = vs.nodeB;
+      if (ground < isl.nodes.length) {
+        for (let i = 0; i < n; i++) { Ar[ground * n + i] = 0; Ai[ground * n + i] = 0; }
+        Ar[ground * n + ground] = 1;
+        br[ground] = 0; bi[ground] = 0;
+      }
+    }
+
+    const { xr, xi } = solveComplex(n, Ar, Ai, br, bi);
+    isl.nodes.forEach((origN, i) => {
+      vRe[origN] = xr[i];
+      vIm[origN] = xi[i];
+    });
+
+    elems.forEach(el => {
+      if (el.type === 'resistor') {
+        const vaRe = xr[el.nodeA] ?? 0, vaIm = xi[el.nodeA] ?? 0;
+        const vbRe = xr[el.nodeB] ?? 0, vbIm = xi[el.nodeB] ?? 0;
+        const g = 1 / Math.max(el.R, 1e-4);
+        iRe[el._gi] = (vaRe - vbRe) * g;
+        iIm[el._gi] = (vaIm - vbIm) * g;
+      } else {
+        const row = vsRow.get(el._gi);
+        if (row !== undefined) {
+          iRe[el._gi] = xr[row];
+          iIm[el._gi] = xi[row];
+        }
+      }
+    });
   }
 
-  return { voltages, currents, islandOf };
-}
-
-function gaussianSolve(A: number[][], b: number[]): number[] {
-  const n = A.length;
-  const M = A.map((row, i) => [...row, b[i]]);
-  for (let col = 0; col < n; col++) {
-    let pivot = col;
-    for (let row = col + 1; row < n; row++) {
-      if (Math.abs(M[row][col]) > Math.abs(M[pivot][col])) pivot = row;
-    }
-    if (Math.abs(M[pivot][col]) < 1e-12) continue;
-    [M[col], M[pivot]] = [M[pivot], M[col]];
-    const div = M[col][col];
-    for (let j = col; j <= n; j++) M[col][j] /= div;
-    for (let row = 0; row < n; row++) {
-      if (row === col) continue;
-      const factor = M[row][col];
-      if (factor === 0) continue;
-      for (let j = col; j <= n; j++) M[row][j] -= factor * M[col][j];
-    }
-  }
-  const x = new Array(n).fill(0);
-  for (let i = 0; i < n; i++) x[i] = M[i][n] || 0;
-  return x;
+  return { vRe, vIm, iRe, iIm, islandOf, islandFreq };
 }
