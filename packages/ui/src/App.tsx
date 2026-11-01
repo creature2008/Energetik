@@ -12,7 +12,7 @@ registerAllMods();
 const GRID_SIZE = 10;
 const CATEGORY_NAMES: Record<string, string> = {
   power: '⚡ Питание', protection: '🛑 Защита', light: '💡 Свет', sockets: '🔌 Розетки',
-  switches: '🔘 Выключатели', psu: '🔋 Блоки питания', motors: '⚙️ Моторы', boxes: '📦 Коробки',
+  switches: '🔘 Выключатели', psu: '🔋 Блоки питания', motors: '⚙️ Моторы', boxes: '📦 Разное',
 };
 
 const DeviceImage = ({ src, x, y, width, height }: any) => {
@@ -31,6 +31,7 @@ function App() {
   const [simResult, setSimResult] = useState<any>(null);
   const [isPaused, setIsPaused] = useState(false);
   const [rotation, setRotation] = useState(0);
+  const [blink, setBlink] = useState(true);
   
   const [probeA, setProbeA] = useState<ProbePoint | null>(null);
   const [probeB, setProbeB] = useState<ProbePoint | null>(null);
@@ -108,7 +109,6 @@ function App() {
         if (!comp) return 0;
         const pin = comp.pins[pinId];
         if (!pin) return 0;
-        // Если пин N — это нейтраль, показываем ток нейтрали (векторную сумму)
         if (pin.label === 'N' || pin.side === 'right') {
           return simResult?.componentNeutralCurrent?.get(compId) || 0;
         }
@@ -214,7 +214,8 @@ function App() {
   useEffect(() => { if (!isPaused) handleRunSimulation(); }, [components, wires, isPaused]);
   useEffect(() => {
     const anim = setInterval(() => setRotation(r => r + 5), 50);
-    return () => clearInterval(anim);
+    const blinkTimer = setInterval(() => setBlink(b => !b), 500);
+    return () => { clearInterval(anim); clearInterval(blinkTimer); };
   }, []);
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -275,35 +276,22 @@ function App() {
         {cfg.type === 'loads' && (() => {
           const loads = (comp.params[cfg.key] as any[]) || [];
           const totalPower = loads.reduce((s, l) => s + (Number(l.power) || 0), 0);
-          
           const addLoad = (presetValue: string) => {
             if (!presetValue) return;
             const preset = cfg.options?.find(o => String(o.value) === presetValue);
             if (!preset) return;
-            const newLoads = [...loads, { id: Date.now(), name: preset.label, power: preset.power || 0 }];
-            updateComponentParam(comp.id, cfg.key, newLoads);
+            updateComponentParam(comp.id, cfg.key, [...loads, { id: Date.now(), name: preset.label, power: preset.power || 0 }]);
           };
-          
           const removeLoad = (idx: number) => {
-            const newLoads = loads.filter((_, i) => i !== idx);
-            updateComponentParam(comp.id, cfg.key, newLoads);
+            updateComponentParam(comp.id, cfg.key, loads.filter((_, i) => i !== idx));
           };
-          
           return (
             <div>
-              <select
-                value=""
-                onChange={(e) => { addLoad(e.target.value); e.target.value = ''; }}
-                style={{ width: '100%', padding: '4px', background: '#333', color: '#fff', border: '1px solid #555', marginBottom: '6px', fontSize: '12px' }}
-              >
+              <select value="" onChange={(e) => { addLoad(e.target.value); e.target.value = ''; }} style={{ width: '100%', padding: '4px', background: '#333', color: '#fff', border: '1px solid #555', marginBottom: '6px', fontSize: '12px' }}>
                 <option value="">+ Добавить прибор...</option>
-                {cfg.options?.map(opt => (
-                  <option key={opt.value} value={String(opt.value)}>{opt.label} ({opt.power}Вт)</option>
-                ))}
+                {cfg.options?.map(opt => <option key={opt.value} value={String(opt.value)}>{opt.label} ({opt.power}Вт)</option>)}
               </select>
-              {loads.length === 0 ? (
-                <div style={{ fontSize: '11px', color: '#888', fontStyle: 'italic', marginBottom: '6px' }}>Пусто</div>
-              ) : (
+              {loads.length === 0 ? (<div style={{ fontSize: '11px', color: '#888', fontStyle: 'italic', marginBottom: '6px' }}>Пусто</div>) : (
                 <div style={{ marginBottom: '6px' }}>
                   {loads.map((load, idx) => (
                     <div key={load.id || idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#2a2a2a', padding: '4px 6px', borderRadius: '3px', marginBottom: '3px', fontSize: '11px' }}>
@@ -406,7 +394,7 @@ function App() {
                 const bottomPins = Object.values(comp.pins).filter((p: any) => p.side === 'bottom');
                 
                 const isBreaker = comp.deviceId.startsWith('breaker');
-                const poles = topPins.length > 0 ? topPins.length : 1;
+                const isSwitch = comp.deviceId.startsWith('switch');
                 const breakerCurrent = simResult?.componentCurrents?.get(comp.id) || 0;
                 const rated = Number(comp.params.ratedCurrent) || 16;
                 const isTripped = comp.params.tripped === true;
@@ -425,87 +413,134 @@ function App() {
                     onDragMove={(e) => { e.target.x(snap(e.target.x())); e.target.y(snap(e.target.y())); }}
                     onDragEnd={(e) => { e.cancelBubble = true; updatePosition(comp.id, e.target.x(), e.target.y()); }}>
                     
-                    {glow > 0 ? <Circle x={mod.size.w/2} y={mod.size.h/2} radius={50} fill="yellow" opacity={glow * 0.8} /> : null}
+                    {glow > 0 ? <Circle x={mod.size.w/2} y={mod.size.h/2} radius={50} fill="yellow" opacity={glow * 0.8} listening={false} /> : null}
 
-                    {isBreaker ? (
-                      <>
-                        <Rect width={mod.size.w} height={mod.size.h} fill="#e8e8e8" stroke="#555" strokeWidth={2} cornerRadius={3} />
-                        {Array.from({ length: poles }).map((_, i) => {
-                          const segW = mod.size.w / poles;
-                          const toggleW = segW - 10;
-                          const toggleH = 36;
-                          const handleH = 16;
-                          const toggleY = mod.size.h / 2 - toggleH / 2;
-                          const handleY = isTripped ? toggleY + toggleH - handleH - 2 : toggleY + 2;
-                          const onClick = (e: any) => {
-                            e.cancelBubble = true;
-                            updateComponentParam(comp.id, 'tripped', !comp.params.tripped);
-                          };
-                          return (
-                            <Group key={i}>
-                              <Rect
-                                x={segW * i + 5}
-                                y={toggleY}
-                                width={toggleW}
-                                height={toggleH}
-                                fill="#1a1a1a"
-                                stroke="#000"
-                                strokeWidth={1}
-                                cornerRadius={2}
-                                onClick={onClick}
-                              />
-                              <Rect
-                                x={segW * i + 7}
-                                y={handleY}
-                                width={toggleW - 4}
-                                height={handleH}
-                                fill={isTripped ? '#7a7a7a' : '#e8e8e8'}
-                                stroke="#333"
-                                strokeWidth={1}
-                                cornerRadius={1}
-                                onClick={onClick}
-                              />
+                    {/* ВЫКЛЮЧАТЕЛИ */}
+                    {isSwitch ? (() => {
+                      const keys = comp.deviceId === 'switch_1' ? 1 : comp.deviceId === 'switch_2' ? 2 : 3;
+                      const totalCurrent = simResult?.componentCurrents?.get(comp.id) || 0;
+                      const isWarning = totalCurrent > 10;
+                      const segW = (mod.size.w - 10) / keys;
+
+                      return (
+                        <Group>
+                          <Rect width={mod.size.w} height={mod.size.h} fill="#d8d8d8" stroke="#555" strokeWidth={2} cornerRadius={4} />
+                          <Rect x={5} y={5} width={mod.size.w - 10} height={mod.size.h - 10} fill="#f5f5f5" stroke="#333" strokeWidth={1} cornerRadius={2} />
+                          
+                          {Array.from({ length: keys }).map((_, k) => {
+                            const isClosed = comp.params['closed' + (k + 1)] === true;
+                            
+                            let ledColor = '#e74c3c';
+                            let ledGlow = false;
+                            if (!isClosed) {
+                              ledColor = '#e74c3c';
+                              ledGlow = true;
+                            } else if (totalCurrent > 0.01) {
+                              ledColor = '#2ecc71';
+                              ledGlow = true;
+                            } else {
+                              ledColor = '#f1c40f';
+                              ledGlow = true;
+                            }
+                            
+                            return (
+                              <Group key={k} x={5 + segW * k} y={5}>
+                                <Rect
+                                  width={segW - 2}
+                                  height={mod.size.h - 10}
+                                  fill={isClosed ? '#ffffff' : '#b8b8b8'}
+                                  stroke="#333"
+                                  strokeWidth={1}
+                                  cornerRadius={2}
+                                  onClick={(e) => {
+                                    e.cancelBubble = true;
+                                    updateComponentParam(comp.id, 'closed' + (k + 1), !isClosed);
+                                  }}
+                                />
+                                {/* Светодиод внизу клавиши, поверх всего */}
+                                <Group x={segW / 2 - 1} y={mod.size.h - 22} listening={false}>
+                                  {ledGlow ? (
+                                    <Circle radius={14} fill={ledColor} opacity={0.35} listening={false} />
+                                  ) : null}
+                                  <Circle radius={6} fill={ledColor} stroke="#111" strokeWidth={1.5} listening={false} />
+                                  <Circle x={-1.5} y={-1.5} radius={1.8} fill="#fff" opacity={0.8} listening={false} />
+                                </Group>
+                              </Group>
+                            );
+                          })}
+                          
+                          {isWarning ? (
+                            <Group x={mod.size.w - 10} y={10} listening={false}>
+                              <Circle radius={8} fill="#e74c3c" stroke="#fff" strokeWidth={1.5} />
+                              <Text text="!" x={-2.5} y={-6} fill="#fff" fontSize={13} fontStyle="bold" />
                             </Group>
-                          );
-                        })}
-                        <Rect
-                          x={mod.size.w - 14}
-                          y={mod.size.h - 22}
-                          width={9}
-                          height={14}
-                          fill={isTripped ? '#e74c3c' : isOverloaded ? '#f39c12' : '#2ecc71'}
-                          stroke="#000"
-                          strokeWidth={1}
-                          cornerRadius={1}
-                        />
-                        <Text
-                          text={(comp.params.curve || 'C') + (comp.params.ratedCurrent || 16)}
-                          x={5}
-                          y={mod.size.h - 20}
-                          width={mod.size.w - 25}
-                          align="left"
-                          fill="#000"
-                          fontSize={13}
-                          fontStyle="bold"
-                        />
-                      </>
-                    ) : imgSrc ? (
-                      <DeviceImage src={imgSrc} x={0} y={0} width={mod.size.w} height={mod.size.h} />
-                    ) : (
-                      <Rect width={mod.size.w} height={mod.size.h} fill={visual?.tint || '#2a6'} cornerRadius={4} />
-                    )}
+                          ) : null}
+                        </Group>
+                      );
+                    })() : null}
 
-                    {spinning === true ? <Arc x={mod.size.w/2} y={mod.size.h/2} innerRadius={10} outerRadius={25} angle={90} rotation={rotation} fill="#f1c40f" opacity={0.8} /> : null}
-                    
-                    {/* Индикатор предупреждения (восклицательный знак) */}
-                    {visual?.warning ? (
-                      <Group x={mod.size.w - 8} y={8}>
+                    {/* АВТОМАТЫ */}
+                    {isBreaker ? (() => {
+                      const poles = topPins.length > 0 ? topPins.length : 1;
+                      return (
+                        <>
+                          <Rect width={mod.size.w} height={mod.size.h} fill="#e8e8e8" stroke="#555" strokeWidth={2} cornerRadius={3} />
+                          {Array.from({ length: poles }).map((_, i) => {
+                            const segW = mod.size.w / poles;
+                            const toggleW = segW - 10;
+                            const toggleH = 36;
+                            const handleH = 16;
+                            const toggleY = mod.size.h / 2 - toggleH / 2;
+                            const handleY = isTripped ? toggleY + toggleH - handleH - 2 : toggleY + 2;
+                            const onClick = (e: any) => {
+                              e.cancelBubble = true;
+                              updateComponentParam(comp.id, 'tripped', !comp.params.tripped);
+                            };
+                            return (
+                              <Group key={i}>
+                                <Rect x={segW * i + 5} y={toggleY} width={toggleW} height={toggleH} fill="#1a1a1a" stroke="#000" strokeWidth={1} cornerRadius={2} onClick={onClick} />
+                                <Rect x={segW * i + 7} y={handleY} width={toggleW - 4} height={handleH} fill={isTripped ? '#7a7a7a' : '#e8e8e8'} stroke="#333" strokeWidth={1} cornerRadius={1} onClick={onClick} />
+                              </Group>
+                            );
+                          })}
+                          <Rect x={mod.size.w - 14} y={mod.size.h - 22} width={9} height={14} fill={isTripped ? '#e74c3c' : isOverloaded ? '#f39c12' : '#2ecc71'} stroke="#000" strokeWidth={1} cornerRadius={1} />
+                          <Text text={(comp.params.curve || 'C') + (comp.params.ratedCurrent || 16)} x={5} y={mod.size.h - 20} width={mod.size.w - 25} align="left" fill="#000" fontSize={13} fontStyle="bold" />
+                        </>
+                      );
+                    })() : null}
+
+                    {/* ОБЫЧНЫЕ УСТРОЙСТВА (imgSrc / цветной прямоугольник) */}
+                    {!isSwitch && !isBreaker ? (
+                      imgSrc ? (
+                        <DeviceImage src={imgSrc} x={0} y={0} width={mod.size.w} height={mod.size.h} />
+                      ) : (
+                        <Rect width={mod.size.w} height={mod.size.h} fill={visual?.tint || '#2a6'} cornerRadius={4} />
+                      )
+                    ) : null}
+
+                    {spinning === true ? <Arc x={mod.size.w/2} y={mod.size.h/2} innerRadius={10} outerRadius={25} angle={90} rotation={rotation} fill="#f1c40f" opacity={0.8} listening={false} /> : null}
+
+                    {visual?.warning && !isSwitch && !isBreaker ? (
+                      <Group x={mod.size.w - 8} y={8} listening={false}>
                         <Circle radius={9} fill="#e74c3c" stroke="#fff" strokeWidth={1.5} />
                         <Text text="!" x={-2.5} y={-6} fill="#fff" fontSize={14} fontStyle="bold" />
                       </Group>
                     ) : null}
 
-                    {/* Клеммы left/right для обычных компонентов */}
+                    {!isBreaker && visual?.label && visual.label.length > 0 ? (
+                      <Text
+                        text={visual.label}
+                        x={0}
+                        y={comp.deviceId === 'led_strip' ? mod.size.h - 14 : mod.size.h/2 - 5}
+                        width={mod.size.w}
+                        align="center"
+                        fill="#fff"
+                        fontSize={comp.deviceId === 'led_strip' ? 10 : 11}
+                        fontStyle="bold"
+                        listening={false}
+                      />
+                    ) : null}
+
                     {leftPins.map((pin: any, idx: number) => (
                       <Circle key={pin.id} x={0} y={20 + idx * 15} radius={7} fill={activePin?.compId === comp.id && activePin?.pinId === pin.id ? '#f1c40f' : pin.color} stroke="#000" 
                         onClick={(e) => { const pos = getPinPos(comp.id, pin.id); if (pos) handlePinClick(comp.id, pin.id, pos.x, pos.y, e); }} />
@@ -514,8 +549,6 @@ function App() {
                       <Circle key={pin.id} x={mod.size.w} y={20 + idx * 15} radius={7} fill={activePin?.compId === comp.id && activePin?.pinId === pin.id ? '#f1c40f' : pin.color} stroke="#000" 
                         onClick={(e) => { const pos = getPinPos(comp.id, pin.id); if (pos) handlePinClick(comp.id, pin.id, pos.x, pos.y, e); }} />
                     ))}
-
-                    {/* Клеммы top/bottom для автоматов */}
                     {topPins.map((pin: any, idx: number) => (
                       <Circle key={pin.id} x={mod.size.w * (idx + 1) / (topPins.length + 1)} y={0} radius={7} fill={activePin?.compId === comp.id && activePin?.pinId === pin.id ? '#f1c40f' : pin.color} stroke="#000" 
                         onClick={(e) => { const pos = getPinPos(comp.id, pin.id); if (pos) handlePinClick(comp.id, pin.id, pos.x, pos.y, e); }} />
@@ -562,11 +595,6 @@ function App() {
               <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute', right: '20px', top: '20px', background: '#252526', border: '1px solid #444', padding: '12px', borderRadius: '8px', color: '#fff', zIndex: 100, minWidth: '200px' }}>
                 <h4 style={{ marginBottom: '8px', fontSize: '14px' }}>{mod?.name || comp.deviceId}</h4>
                 {renderInspectorFields(comp)}
-                {comp.deviceId === 'led_strip' ? (
-                  <div style={{ marginBottom: '8px', fontSize: '12px', color: '#f1c40f', fontWeight: 'bold' }}>
-                    Итого: {(comp.params.powerPerMeter * comp.params.length).toFixed(1)} Вт
-                  </div>
-                ) : null}
                 <button onClick={() => setSelectedCompId(null)} style={{ background: '#555', color: '#fff', border: 'none', padding: '4px 8px', cursor: 'pointer', width: '100%', fontSize: '12px', marginTop: '5px' }}>Закрыть</button>
               </div>
             );

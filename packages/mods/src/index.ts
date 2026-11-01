@@ -5,7 +5,7 @@ import { supply_us_2ph } from './supply_us_2ph';
 import { lamp } from './lamp';
 import { led_strip } from './led_strip';
 import { breaker_1p, breaker_2p, breaker_3p, breaker_4p } from './breaker';
-import { switchMod } from './switch';
+import { switch_1, switch_2, switch_3 } from './switch';
 import {
   socket_10a_pe, socket_10a,
   socket_16a, socket_16a_2p,
@@ -27,8 +27,9 @@ export function registerAllMods() {
   registry.register(breaker_2p);
   registry.register(breaker_3p);
   registry.register(breaker_4p);
-  registry.register(switchMod);
-  // Розетки — по возрастанию номинала
+  registry.register(switch_1);
+  registry.register(switch_2);
+  registry.register(switch_3);
   registry.register(socket_10a_pe);
   registry.register(socket_10a);
   registry.register(socket_16a);

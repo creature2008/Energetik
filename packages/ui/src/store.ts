@@ -59,10 +59,13 @@ export const useStore = create<UIState>((set) => ({
 const DEVICE_ALIASES: Record<string, string> = {
   socket: 'socket_16a',
   socket_32a_2p: 'socket_32a',
+  switch: 'switch_1',
 };
 
 function hydrateComponent(comp: any): any {
-  const deviceId = DEVICE_ALIASES[comp.deviceId] || comp.deviceId;
+  let deviceId = DEVICE_ALIASES[comp.deviceId] || comp.deviceId;
+  // Миграция: старый 4-пиновый клеммник → terminal
+  if (deviceId === 'terminal_4') deviceId = 'terminal';
   const mod = registry.get(deviceId);
   if (!mod) return comp;
   const params: Record<string, any> = { ...comp.params };
