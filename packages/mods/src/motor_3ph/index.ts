@@ -1,4 +1,4 @@
-﻿import type { DeviceMod } from '@electro/core';
+import type { DeviceMod } from '@electro/core';
 import { windingImpedance } from '../_shared/motorModel';
 
 export const motor_3ph: DeviceMod = {
@@ -24,16 +24,25 @@ export const motor_3ph: DeviceMod = {
   ],
   stamp({ comp, node }) {
     const isY = comp.params.connection !== 'D';
-    // Для Y: U_лин = 380, U_обм = 380/√3 = 220
-    // Для Δ: U_лин = 380, U_обм = 380
     const Uw = isY ? 380 / Math.sqrt(3) : 380;
-    const { R, L } = windingImpedance({
-      Pout: comp.params.power || 3000,
-      eta: (comp.params.efficiency || 88) / 100,
-      cosPhi: comp.params.cosPhi || 0.85,
-      Uw,
-      phases: 3,
-    });
+    const Pout = comp.params.power || 3000;
+    const eta = (comp.params.efficiency || 88) / 100;
+    const cosPhiRun = comp.params.cosPhi || 0.85;
+    const cosPhiStart = 0.4;
+    const k = comp.params.startupMultiplier || 7;
+    const isStarting = comp.params.startup === true;
+
+    const run = windingImpedance({ Pout, eta, cosPhi: cosPhiRun, Uw, phases: 3 });
+    let R: number, L: number;
+    if (isStarting) {
+      const Z_start = run.Z_mag / k;
+      R = Z_start * cosPhiStart;
+      const X = Z_start * Math.sqrt(1 - cosPhiStart * cosPhiStart);
+      L = X / (2 * Math.PI * 50);
+    } else {
+      R = run.R;
+      L = run.L;
+    }
 
     const els: any[] = [];
     if (isY) {
@@ -60,6 +69,7 @@ export const motor_3ph: DeviceMod = {
     } else {
       avg = (Math.abs(volts('L1', 'L2')) + Math.abs(volts('L2', 'L3')) + Math.abs(volts('L3', 'L1'))) / 3;
     }
-    return { visual: { spinning: avg > 50 } };
+    const isStarting = comp.params.startup === true;
+    return { visual: { spinning: avg > 50, tint: isStarting ? '#f39c12' : undefined } };
   },
 };

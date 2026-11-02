@@ -5,6 +5,7 @@ import { registerAllMods } from '@electro/mods';
 import { useStore, buildProjectForSimulation, loadProjectData } from './store';
 import { CABLES, getCableById, CableSpec } from './cables';
 import useImage from 'use-image';
+import { Calculator } from './Calculator';
 import { save, open } from '@tauri-apps/plugin-dialog';
 import { writeTextFile, readTextFile } from '@tauri-apps/plugin-fs';
 
@@ -47,6 +48,7 @@ function App() {
   const [isAltPressed, setIsAltPressed] = useState(false);
   const [isCtrlPressed, setIsCtrlPressed] = useState(false);
 
+  const [showCalculator, setShowCalculator] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [openCategories, setOpenCategories] = useState<string[]>(['power']);
   const [stagePos, setStagePos] = useState({ x: 0, y: 0 });
@@ -76,6 +78,12 @@ function App() {
 
   const addLog = (msg: string) => setLogs(prev => [...prev, msg]);
   const addHistory = useStore(s => s.pushHistory);
+
+  // === Авто-пуск моторов ===
+  const prevMotorVoltagesRef = useRef<Map<string, number>>(new Map());
+  const motorsInStartupRef = useRef<Set<string>>(new Set());
+  const startupTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const handleRunSimulationRef = useRef<() => void>(() => {});
 
   const handleAdd = (deviceId: string) => {
     addComponent(deviceId, snap(100 + Math.random() * 300), snap(100 + Math.random() * 200));
@@ -226,8 +234,46 @@ function App() {
   const handleRunSimulation = () => {
     try {
       const project = buildProjectForSimulation();
+
+      // Применяем режим пуска к моторам, которые сейчас в процессе
+      for (const comp of project.components) {
+        if (comp.deviceId === 'motor_1ph' || comp.deviceId === 'motor_3ph') {
+          (comp.params as any).startup = motorsInStartupRef.current.has(comp.id);
+        }
+      }
+
       const res = runSimulation(project as any);
       setSimResult(res);
+
+      // Отслеживаем переходы моторов (выкл → вкл)
+      for (const comp of project.components) {
+        if (comp.deviceId !== 'motor_1ph' && comp.deviceId !== 'motor_3ph') continue;
+        const pinId = comp.deviceId === 'motor_3ph' ? 'L1' : 'L';
+        const re = res.pinVRe?.get(comp.id)?.get(pinId) || 0;
+        const im = res.pinVIm?.get(comp.id)?.get(pinId) || 0;
+        const v = Math.hypot(re, im);
+        const prevV = prevMotorVoltagesRef.current.get(comp.id) || 0;
+        prevMotorVoltagesRef.current.set(comp.id, v);
+
+        if (prevV < 50 && v > 50 && !motorsInStartupRef.current.has(comp.id)) {
+          // Мотор только что включился — начинаем пуск
+          motorsInStartupRef.current.add(comp.id);
+          const timer = setTimeout(() => {
+            motorsInStartupRef.current.delete(comp.id);
+            startupTimersRef.current.delete(comp.id);
+            handleRunSimulationRef.current();
+          }, 1000);
+          startupTimersRef.current.set(comp.id, timer);
+          // Сразу пересчитываем с пусковым режимом
+          setTimeout(() => handleRunSimulationRef.current(), 0);
+        } else if (v < 50 && motorsInStartupRef.current.has(comp.id)) {
+          // Мотор отключился — сбрасываем пуск
+          const t = startupTimersRef.current.get(comp.id);
+          if (t) clearTimeout(t);
+          startupTimersRef.current.delete(comp.id);
+          motorsInStartupRef.current.delete(comp.id);
+        }
+      }
       if (res.updatedParams.size > 0) {
         res.updatedParams.forEach((params: any, compId: any) => {
           Object.entries(params).forEach(([k, v]) => {
@@ -310,6 +356,9 @@ function App() {
       }
     } catch {}
   }, []);
+
+  // Обновляем реф на каждом рендере (для таймеров)
+  handleRunSimulationRef.current = handleRunSimulation;
 
   useEffect(() => { if (!isPaused) handleRunSimulation(); }, [components, wires, isPaused]);
   useEffect(() => {
@@ -468,7 +517,7 @@ function App() {
               </div>
             )}
           </div>
-          <button className="icon-btn" onClick={handleSaveProject} title="Сохранить (Ctrl+S)">💾</button>
+          <button className="icon-btn" onClick={() => setShowCalculator(true)} title="Калькулятор">🧮</button>`n          <button className="icon-btn" onClick={handleSaveProject} title="Сохранить (Ctrl+S)">💾</button>
           <button className="icon-btn" onClick={handleLoadProject} title="Загрузить (Ctrl+O)">📂</button>
           <button className="icon-btn" onClick={handlePasteFromClipboard} title="Импорт из буфера">📋</button>
           <button className="icon-btn" onClick={() => setIsPaused(!isPaused)} title={isPaused ? 'Продолжить' : 'Пауза'}>
@@ -820,6 +869,8 @@ function App() {
         <h4 style={{ marginBottom: '5px', fontSize: '12px' }}>События:</h4>
         {logs.filter(l => !l.startsWith('[ПРОБЛЕМА]')).map((log, i) => <div key={i} className="log-entry">{log}</div>)}
       </div>
+      
+      <Calculator open={showCalculator} onClose={() => setShowCalculator(false)} />
     </div>
   );
 }

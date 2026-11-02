@@ -88,9 +88,14 @@ export function lintProtection(project: Project): SimEvent[] {
     if (!connected) continue;
 
     const power = Number(motor.params.power) || 1000;
-    const multiplier = Number(motor.params.startupMultiplier) || 6;
+    const multiplier = Number(motor.params.startupMultiplier) || (motor.deviceId === 'motor_3ph' ? 7 : 6);
+    const eta = (Number(motor.params.efficiency) || (motor.deviceId === 'motor_3ph' ? 88 : 85)) / 100;
+    const cosPhi = Number(motor.params.cosPhi) || (motor.deviceId === 'motor_3ph' ? 0.85 : 0.8);
+    const Pin = power / eta;
     const voltage = motor.deviceId === 'motor_3ph' ? 380 : 220;
-    const startupCurrent = (power / voltage) * multiplier;
+    const phasesFactor = motor.deviceId === 'motor_3ph' ? Math.sqrt(3) : 1;
+    const nominalCurrent = Pin / (phasesFactor * voltage * cosPhi);
+    const startupCurrent = nominalCurrent * multiplier;
 
     for (const breakerId of allBreakers) {
       const breaker = project.components.find(c => c.id === breakerId);
