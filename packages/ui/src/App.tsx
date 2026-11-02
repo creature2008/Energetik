@@ -23,6 +23,13 @@ const DeviceImage = ({ src, x, y, width, height }: any) => {
 const snap = (v: number) => Math.round(v / GRID_SIZE) * GRID_SIZE;
 type ProbePoint = { compId: string, pinId: string, x: number, y: number };
 
+function formatPower(w: number): string {
+  if (w >= 1e6) return (w / 1e6).toFixed(2) + ' МВт';
+  if (w >= 1e3) return (w / 1e3).toFixed(2) + ' кВт';
+  if (w >= 1) return w.toFixed(2) + ' Вт';
+  return (w * 1000).toFixed(1) + ' мВт';
+}
+
 function App() {
   const [logs, setLogs] = useState<string[]>(['[Система] Приложение запущено.']);
   const [selectedWireId, setSelectedWireId] = useState<string | null>(null);
@@ -90,8 +97,17 @@ function App() {
       if (newA && newB) {
         const r = measure(simResult, newA, newB);
         let text = 'OL';
-        if (r.kind === 'ok') text = r.volts.toFixed(2) + (r.isAC ? ' В ~' + r.freq + 'Гц' : ' В DC');
-        else if (r.kind === 'isolated') text = 'OL (разные цепи)';
+        if (r.kind === 'ok') {
+          if (r.isShorted) {
+            text = '0 В | Замкнуто';
+          } else if (r.isAC) {
+            text = r.volts.toFixed(2) + ' В ~' + r.freq + 'Гц';
+          } else {
+            text = r.volts.toFixed(2) + ' В DC';
+          }
+        }
+        else if (r.kind === 'isolated') text = 'OL | Обрыв';
+        else if (r.kind === 'open') text = 'OL | Не подключено';
         const pos = e.target.getStage()?.getPointerPosition();
         if (pos) setMeasureResult({ x: pos.x, y: pos.y - 40, text });
       } else {
@@ -100,9 +116,22 @@ function App() {
       }
       return;
     }
-    if (!activePin) setActivePin({ compId, pinId });
-    else {
-      if (activePin.compId !== compId || activePin.pinId !== pinId) addWire(activePin, { compId, pinId });
+    if (!activePin) {
+      setActivePin({ compId, pinId });
+    } else {
+      // Клик по той же клемме — просто отмена
+      if (activePin.compId === compId && activePin.pinId === pinId) {
+        setActivePin(null);
+        return;
+      }
+      // Защита от замыкания клемм одного прибора
+      if (activePin.compId === compId) {
+        addLog('[!] Нельзя соединить две клеммы одного прибора — это КЗ');
+        setActivePin(null);
+        return;
+      }
+      // Соединяем с любой клеммой другого прибора (даже если pinId совпадает)
+      addWire(activePin, { compId, pinId });
       setActivePin(null);
     }
   };
@@ -111,32 +140,47 @@ function App() {
     if (e.evt.shiftKey) {
       e.cancelBubble = true;
       const stage = e.target.getStage();
-      const pointer = stage?.getPointerPosition();
+      const pointer = stage?.getRelativePointerPosition();
       if (pointer) {
         const pts = getWirePointsArray(wire);
         let idx = 0;
+        let bestDist = Infinity;
         for (let i = 0; i < pts.length - 1; i++) {
           const p1 = pts[i]; const p2 = pts[i + 1];
-          if (pointer.x >= Math.min(p1.x, p2.x) - 10 && pointer.x <= Math.max(p1.x, p2.x) + 10 &&
-              pointer.y >= Math.min(p1.y, p2.y) - 10 && pointer.y <= Math.max(p1.y, p2.y) + 10) { idx = i; break; }
+          const dx = p2.x - p1.x, dy = p2.y - p1.y;
+          const lenSq = dx * dx + dy * dy;
+          let t = lenSq > 0 ? ((pointer.x - p1.x) * dx + (pointer.y - p1.y) * dy) / lenSq : 0;
+          t = Math.max(0, Math.min(1, t));
+          const px = p1.x + t * dx, py = p1.y + t * dy;
+          const dist = Math.hypot(pointer.x - px, pointer.y - py);
+          if (dist < bestDist) { bestDist = dist; idx = i; }
         }
-        insertWaypoint(wire.id, snap(pointer.x), snap(pointer.y), idx);
+        if (bestDist < 20) {
+          insertWaypoint(wire.id, snap(pointer.x), snap(pointer.y), idx);
+        }
       }
       return;
     }
     if (isAltPressed) {
       e.cancelBubble = true;
       const getCur = (compId: string, pinId: string) => {
-        const comp = components.find(c => c.id === compId);
-        if (!comp) return 0;
-        const pin = comp.pins[pinId];
-        if (!pin) return 0;
-        if (pin.label === 'N' || pin.side === 'right') return simResult?.componentNeutralCurrent?.get(compId) || 0;
-        return simResult?.componentCurrents?.get(compId) || 0;
+        return simResult?.pinCurrents?.get(compId + ':' + pinId) || 0;
       };
-      const current = Math.max(getCur(wire.from.compId, wire.from.pinId), getCur(wire.to.compId, wire.to.pinId));
+      const getVolt = (compId: string, pinId: string) => {
+        const re = simResult?.pinVRe?.get(compId)?.get(pinId) || 0;
+        const im = simResult?.pinVIm?.get(compId)?.get(pinId) || 0;
+        return Math.hypot(re, im);
+      };
+      const curA = getCur(wire.from.compId, wire.from.pinId);
+      const curB = getCur(wire.to.compId, wire.to.pinId);
+      const volA = getVolt(wire.from.compId, wire.from.pinId);
+      const volB = getVolt(wire.to.compId, wire.to.pinId);
+      const current = Math.min(curA, curB);
+      const voltage = Math.max(volA, volB);
+      const power = voltage * current;
+      const text = current.toFixed(3) + ' А | ' + power.toFixed(1) + ' Вт';
       const pos = e.target.getStage()?.getPointerPosition();
-      if (pos) setMeasureResult({ x: pos.x, y: pos.y - 40, text: current.toFixed(3) + ' А' });
+      if (pos) setMeasureResult({ x: pos.x, y: pos.y - 40, text });
       return;
     }
     e.cancelBubble = true;
@@ -192,15 +236,20 @@ function App() {
           });
         });
       }
-      const lintEvents = lintProtection(project as any);
-      if (lintEvents.length > 0) {
+      // Выводим debug-логи в панель событий
+      if (res.debugLogs && res.debugLogs.length > 0) {
         setLogs(prev => {
-          const filtered = prev.filter(l => !l.startsWith('[ПУЭ]'));
-          return [...filtered, ...lintEvents.map((e: any) => '[ПУЭ] ' + e.message)];
+          const filtered = prev.filter(l => !l.startsWith('[DBG]'));
+          return [...filtered, ...res.debugLogs];
         });
-      } else {
-        setLogs(prev => prev.filter(l => !l.startsWith('[ПУЭ]')));
       }
+      
+      const lintEvents = lintProtection(project as any);
+      const allEvents = [...(res.events || []), ...lintEvents];
+      setLogs(prev => {
+        const filtered = prev.filter(l => !l.startsWith('[ПРОБЛЕМА]'));
+        return [...filtered, ...allEvents.map((e: any) => '[ПРОБЛЕМА] ' + e.message)];
+      });
     } catch (err: any) {
       addLog('[ОШИБКА СИМУЛЯЦИИ] ' + (err.message || String(err)));
     }
@@ -376,7 +425,7 @@ function App() {
     return true;
   });
 
-  const problems = logs.filter(l => l.startsWith('[ПУЭ]'));
+  const problems = logs.filter(l => l.startsWith('[ПРОБЛЕМА]'));
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', width: '100vw', height: '100vh' }}>
@@ -630,6 +679,13 @@ function App() {
                       imgSrc ? <DeviceImage src={imgSrc} x={0} y={0} width={mod.size.w} height={mod.size.h} /> : <Rect width={mod.size.w} height={mod.size.h} fill={visual?.tint || '#2a6'} cornerRadius={4} />
                     ) : null}
 
+                    {comp.deviceId === 'psu_12v' ? (
+                      <Group x={mod.size.w - 20} y={mod.size.h - 18} listening={false}>
+                        <Circle radius={7} fill={visual?.tint || '#333'} opacity={0.4} listening={false} />
+                        <Circle radius={4} fill={visual?.tint || '#333'} stroke="#111" strokeWidth={1} listening={false} />
+                      </Group>
+                    ) : null}
+
                     {spinning === true ? <Arc x={mod.size.w/2} y={mod.size.h/2} innerRadius={10} outerRadius={25} angle={90} rotation={rotation} fill="#f1c40f" opacity={0.8} listening={false} /> : null}
                     {visual?.warning && !isSwitch && !isBreaker ? (
                       <Group x={mod.size.w - 8} y={8} listening={false}>
@@ -639,21 +695,51 @@ function App() {
                     ) : null}
 
                     {!isBreaker && visual?.label && visual.label.length > 0 ? (
-                      <Text text={visual.label} x={0} y={comp.deviceId === 'led_strip' ? mod.size.h - 14 : mod.size.h/2 - 5} width={mod.size.w} align="center" fill="#fff" fontSize={comp.deviceId === 'led_strip' ? 10 : 11} fontStyle="bold" listening={false} />
+                      <Text
+                        text={visual.label}
+                        x={0}
+                        y={comp.deviceId === 'led_strip' ? mod.size.h - 14 : (isSwitch ? mod.size.h - 12 : mod.size.h/2 - 5)}
+                        width={mod.size.w}
+                        align="center"
+                        fill={isSwitch ? '#333' : '#fff'}
+                        fontSize={isSwitch ? 10 : (comp.deviceId === 'led_strip' ? 10 : 11)}
+                        fontStyle="bold"
+                        listening={false}
+                      />
                     ) : null}
 
-                    {leftPins.map((pin: any, idx: number) => (
-                      <Circle key={pin.id} x={0} y={20 + idx * 15} radius={7} fill={activePin?.compId === comp.id && activePin?.pinId === pin.id ? '#f1c40f' : pin.color} stroke="#000" onClick={(e) => { const pos = getPinPos(comp.id, pin.id); if (pos) handlePinClick(comp.id, pin.id, pos.x, pos.y, e); }} />
-                    ))}
-                    {rightPins.map((pin: any, idx: number) => (
-                      <Circle key={pin.id} x={mod.size.w} y={20 + idx * 15} radius={7} fill={activePin?.compId === comp.id && activePin?.pinId === pin.id ? '#f1c40f' : pin.color} stroke="#000" onClick={(e) => { const pos = getPinPos(comp.id, pin.id); if (pos) handlePinClick(comp.id, pin.id, pos.x, pos.y, e); }} />
-                    ))}
-                    {topPins.map((pin: any, idx: number) => (
-                      <Circle key={pin.id} x={mod.size.w * (idx + 1) / (topPins.length + 1)} y={0} radius={7} fill={activePin?.compId === comp.id && activePin?.pinId === pin.id ? '#f1c40f' : pin.color} stroke="#000" onClick={(e) => { const pos = getPinPos(comp.id, pin.id); if (pos) handlePinClick(comp.id, pin.id, pos.x, pos.y, e); }} />
-                    ))}
-                    {bottomPins.map((pin: any, idx: number) => (
-                      <Circle key={pin.id} x={mod.size.w * (idx + 1) / (bottomPins.length + 1)} y={mod.size.h} radius={7} fill={activePin?.compId === comp.id && activePin?.pinId === pin.id ? '#f1c40f' : pin.color} stroke="#000" onClick={(e) => { const pos = getPinPos(comp.id, pin.id); if (pos) handlePinClick(comp.id, pin.id, pos.x, pos.y, e); }} />
-                    ))}
+                    {leftPins.map((pin: any, idx: number) => {
+                      const isActive = activePin?.compId === comp.id && activePin?.pinId === pin.id;
+                      const isSameComp = activePin?.compId === comp.id && activePin?.pinId !== pin.id;
+                      const fillColor = isActive ? '#f1c40f' : isSameComp ? '#e74c3c' : pin.color;
+                      return (
+                        <Circle key={pin.id} x={0} y={20 + idx * 15} radius={7} fill={fillColor} stroke="#000" onClick={(e) => { const pos = getPinPos(comp.id, pin.id); if (pos) handlePinClick(comp.id, pin.id, pos.x, pos.y, e); }} />
+                      );
+                    })}
+                    {rightPins.map((pin: any, idx: number) => {
+                      const isActive = activePin?.compId === comp.id && activePin?.pinId === pin.id;
+                      const isSameComp = activePin?.compId === comp.id && activePin?.pinId !== pin.id;
+                      const fillColor = isActive ? '#f1c40f' : isSameComp ? '#e74c3c' : pin.color;
+                      return (
+                        <Circle key={pin.id} x={mod.size.w} y={20 + idx * 15} radius={7} fill={fillColor} stroke="#000" onClick={(e) => { const pos = getPinPos(comp.id, pin.id); if (pos) handlePinClick(comp.id, pin.id, pos.x, pos.y, e); }} />
+                      );
+                    })}
+                    {topPins.map((pin: any, idx: number) => {
+                      const isActive = activePin?.compId === comp.id && activePin?.pinId === pin.id;
+                      const isSameComp = activePin?.compId === comp.id && activePin?.pinId !== pin.id;
+                      const fillColor = isActive ? '#f1c40f' : isSameComp ? '#e74c3c' : pin.color;
+                      return (
+                        <Circle key={pin.id} x={mod.size.w * (idx + 1) / (topPins.length + 1)} y={0} radius={7} fill={fillColor} stroke="#000" onClick={(e) => { const pos = getPinPos(comp.id, pin.id); if (pos) handlePinClick(comp.id, pin.id, pos.x, pos.y, e); }} />
+                      );
+                    })}
+                    {bottomPins.map((pin: any, idx: number) => {
+                      const isActive = activePin?.compId === comp.id && activePin?.pinId === pin.id;
+                      const isSameComp = activePin?.compId === comp.id && activePin?.pinId !== pin.id;
+                      const fillColor = isActive ? '#f1c40f' : isSameComp ? '#e74c3c' : pin.color;
+                      return (
+                        <Circle key={pin.id} x={mod.size.w * (idx + 1) / (bottomPins.length + 1)} y={mod.size.h} radius={7} fill={fillColor} stroke="#000" onClick={(e) => { const pos = getPinPos(comp.id, pin.id); if (pos) handlePinClick(comp.id, pin.id, pos.x, pos.y, e); }} />
+                      );
+                    })}
                   </Group>
                 );
               })}
@@ -683,9 +769,18 @@ function App() {
             const cable = getCableById(w.cableId || '');
             return (
               <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute', left: wireMenuPos.x, top: wireMenuPos.y, background: '#333', border: '1px solid #555', borderRadius: '6px', padding: '10px', zIndex: 100, display: 'flex', flexDirection: 'column', gap: '8px', minWidth: '220px' }}>
-                <div style={{ color: '#fff', fontSize: '12px' }}>Провод</div>
-                <div style={{ color: '#ccc', fontSize: '11px' }}>{cable ? cable.display : 'Сечение: ' + (w.crossSection || 2.5) + ' мм²'}</div>
+                <div style={{ color: '#fff', fontSize: '12px', fontWeight: 'bold' }}>Провод</div>
+                <div style={{ color: '#ccc', fontSize: '11px' }}>{cable ? cable.display : ((w.material === 'aluminum' ? 'Al' : 'Cu') + ' ' + (w.crossSection || 2.5) + ' мм²')}</div>
                 <div style={{ display: 'flex', gap: '5px' }}>{['#3498db', '#e74c3c', '#f1c40f', '#2ecc71'].map(c => <div key={c} onClick={() => { setWireColor(selectedWireId, c); setWireMenuPos(null); }} style={{ width: '20px', height: '20px', background: c, cursor: 'pointer', borderRadius: '3px' }} />)}</div>
+                <label style={{ fontSize: '11px', color: '#ccc' }}>Материал:</label>
+                <select value={w.material || 'copper'} onChange={(e) => updateWire(selectedWireId, { material: e.target.value as 'copper' | 'aluminum', cableId: undefined })} style={{ width: '100%', padding: '4px', background: '#222', color: '#fff', border: '1px solid #555', borderRadius: '3px' }}>
+                  <option value="copper">Медь (ρ=0.0175)</option>
+                  <option value="aluminum">Алюминий (ρ=0.028)</option>
+                </select>
+                <label style={{ fontSize: '11px', color: '#ccc' }}>Сечение (мм²):</label>
+                <select value={w.crossSection || 2.5} onChange={(e) => updateWire(selectedWireId, { crossSection: Number(e.target.value), cableId: undefined })} style={{ width: '100%', padding: '4px', background: '#222', color: '#fff', border: '1px solid #555', borderRadius: '3px' }}>
+                  {[0.5, 0.75, 1, 1.5, 2.5, 4, 6, 10, 16, 25, 35, 50, 70, 95].map(s => <option key={s} value={s}>{s} мм²</option>)}
+                </select>
                 <label style={{ fontSize: '11px', color: '#ccc' }}>Длина (м):</label>
                 <input type="number" value={w.length || 1} onChange={(e) => updateWire(selectedWireId, { length: Number(e.target.value) })} style={{ width: '100%', padding: '4px', background: '#222', color: '#fff', border: '1px solid #555', borderRadius: '3px' }} />
                 {selectedCable && (
@@ -723,7 +818,7 @@ function App() {
 
       <div className="logs">
         <h4 style={{ marginBottom: '5px', fontSize: '12px' }}>События:</h4>
-        {logs.filter(l => !l.startsWith('[ПУЭ]')).map((log, i) => <div key={i} className="log-entry">{log}</div>)}
+        {logs.filter(l => !l.startsWith('[ПРОБЛЕМА]')).map((log, i) => <div key={i} className="log-entry">{log}</div>)}
       </div>
     </div>
   );

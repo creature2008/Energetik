@@ -1,4 +1,4 @@
-﻿import { create } from 'zustand';
+import { create } from 'zustand';
 import { registry } from '@electro/core';
 import type { CableSpec } from './cables';
 
@@ -6,7 +6,7 @@ export type PinRef = { compId: string; pinId: string };
 export type Point = { x: number; y: number };
 export type Wire = {
   id: string; from: PinRef; to: PinRef; waypoints: Point[];
-  color?: string; crossSection?: number; length?: number; cableId?: string;
+  color?: string; crossSection?: number; length?: number; cableId?: string; material?: 'copper' | 'aluminum';
 };
 
 export type Snapshot = { components: any[]; wires: Wire[] };
@@ -122,6 +122,10 @@ export const useStore = create<UIState>((set, get) => ({
   setActivePin: (pin) => set({ activePin: pin }),
 
   addWire: (from, to) => {
+    // Защита от замыкания клемм одного прибора
+    if (from.compId === to.compId) {
+      return;
+    }
     get().pushHistory();
     const cable = get().selectedCable;
     set((state) => {
@@ -133,7 +137,7 @@ export const useStore = create<UIState>((set, get) => ({
       const newWire: Wire = {
         id: 'wire_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
         from, to, waypoints: [], crossSection: cable ? cable.crossSection : 2.5,
-        length: 1, cableId: cable?.id,
+        length: 1, cableId: cable?.id, material: cable?.material || 'copper',
       };
       return { wires: [...state.wires, newWire], activePin: null };
     });
@@ -272,7 +276,7 @@ export const useStore = create<UIState>((set, get) => ({
     get().pushHistory();
     const set0 = new Set(wireIds);
     set((state) => ({
-      wires: state.wires.map(w => set0.has(w.id) ? { ...w, cableId: cable.id, crossSection: cable.crossSection } : w),
+      wires: state.wires.map(w => set0.has(w.id) ? { ...w, cableId: cable.id, crossSection: cable.crossSection, material: cable.material } : w),
     }));
   },
 }));
@@ -311,6 +315,7 @@ export const buildProjectForSimulation = () => {
     wires: state.wires.map((w, i) => ({
       id: w.id, number: i + 1, from: w.from, to: w.to,
       color: w.color || '#3498db', crossSection: w.crossSection || 2.5,
+      length: w.length || 1, material: w.material || 'copper',
       waypoints: w.waypoints || [], routing: 'manual'
     })),
     nets: [],

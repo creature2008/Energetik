@@ -1,4 +1,4 @@
-﻿import type { DeviceMod } from '@electro/core';
+import type { DeviceMod } from '@electro/core';
 export const lamp: DeviceMod = {
   id: 'lamp', name: 'Лампа', category: 'light',
   size: { w: 80, h: 60 }, icon: 'lamp.svg',
@@ -9,6 +9,8 @@ export const lamp: DeviceMod = {
   params: [
     { key: 'power', label: 'Мощность (Вт)', type: 'number', default: 100 },
     { key: 'voltage', label: 'Напряжение (В)', type: 'number', default: 220 },
+    { key: 'grounded', label: 'Заземлён', type: 'boolean', default: true },
+    { key: 'leakage', label: 'Утечка (мА)', type: 'number', default: 0 },
   ],
   stamp({ comp, node }) {
     const a = node('L'), b = node('N');

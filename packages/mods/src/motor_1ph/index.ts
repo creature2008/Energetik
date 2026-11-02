@@ -10,6 +10,8 @@ export const motor_1ph: DeviceMod = {
   params: [
     { key: 'power', label: 'Мощность (Вт)', type: 'number', default: 1000 },
     { key: 'startupMultiplier', label: 'Пусковой ток (×ном.)', type: 'number', default: 6 },
+    { key: 'grounded', label: 'Заземлён', type: 'boolean', default: true },
+    { key: 'leakage', label: 'Утечка (мА)', type: 'number', default: 0 },
   ],
   stamp({ comp, node }) {
     const a = node('L'), b = node('N');

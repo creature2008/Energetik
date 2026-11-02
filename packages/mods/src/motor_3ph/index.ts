@@ -1,4 +1,4 @@
-﻿import type { DeviceMod } from '@electro/core';
+import type { DeviceMod } from '@electro/core';
 export const motor_3ph: DeviceMod = {
   id: 'motor_3ph', name: 'Мотор 3-ф', category: 'motors',
   size: { w: 80, h: 60 }, icon: 'motor_3ph.svg',
@@ -15,6 +15,8 @@ export const motor_3ph: DeviceMod = {
       { value: 'D', label: 'Треугольник (Δ)' },
     ]},
     { key: 'startupMultiplier', label: 'Пусковой ток (×ном.)', type: 'number', default: 7 },
+    { key: 'grounded', label: 'Заземлён', type: 'boolean', default: true },
+    { key: 'leakage', label: 'Утечка (мА)', type: 'number', default: 0 },
   ],
   stamp({ comp, node }) {
     const Pphase = comp.params.power / 3;

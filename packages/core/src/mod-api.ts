@@ -21,6 +21,8 @@ export interface EvalCtx {
   current: number;
   sumCurrent: number;
   isIsolated(a: string, b: string): boolean;
+  pinCurrent(pinId: string): number;
+  pinCurrentComplex(pinId: string): { re: number; im: number };
   signedVolts(a: string, b: string): number;
   isAC: boolean;
 }

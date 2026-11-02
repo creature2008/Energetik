@@ -1,4 +1,4 @@
-﻿import type { DeviceMod } from '@electro/core';
+import type { DeviceMod } from '@electro/core';
 
 const PRESETS: { value: string; label: string; power: number }[] = [
   { value: 'iron', label: 'Утюг', power: 2000 },
@@ -50,6 +50,8 @@ function makeSocket(id: string, name: string, ampRating: number, phases: 1 | 3, 
       { key: 'loads', label: 'Приборы', type: 'loads', default: [], options: PRESETS },
       { key: 'manualPowerW', label: 'Мощность (Вт)', type: 'number', default: 0 },
       { key: 'manualCurrentA', label: 'Ток (А)', type: 'number', default: 0 },
+      { key: 'grounded', label: 'Заземлён', type: 'boolean', default: true },
+      { key: 'leakage', label: 'Утечка (мА)', type: 'number', default: 0 },
     ],
     stamp({ comp, node }) {
       const n = node('N');

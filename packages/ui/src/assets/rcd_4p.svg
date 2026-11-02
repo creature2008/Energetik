@@ -1,0 +1,9 @@
+﻿<svg width="140" height="80" viewBox="0 0 140 80" xmlns="http://www.w3.org/2000/svg">
+  <rect x="5" y="5" width="130" height="70" rx="3" fill="#e8e8e8" stroke="#555" stroke-width="2"/>
+  <rect x="15" y="20" width="22" height="40" rx="2" fill="#1a1a1a"/>
+  <rect x="42" y="20" width="22" height="40" rx="2" fill="#1a1a1a"/>
+  <rect x="69" y="20" width="22" height="40" rx="2" fill="#1a1a1a"/>
+  <rect x="96" y="20" width="22" height="40" rx="2" fill="#1a1a1a"/>
+  <text x="70" y="15" font-size="8" text-anchor="middle" fill="#333" font-family="sans-serif" font-weight="bold">УЗО 4P</text>
+  <circle cx="70" cy="68" r="3" fill="#f39c12" stroke="#000" stroke-width="0.5"/>
+</svg>

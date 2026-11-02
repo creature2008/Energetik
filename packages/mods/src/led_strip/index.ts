@@ -1,4 +1,4 @@
-﻿import type { DeviceMod } from '@electro/core';
+import type { DeviceMod } from '@electro/core';
 export const led_strip: DeviceMod = {
   id: 'led_strip', name: 'СД Лента', category: 'light',
   size: { w: 100, h: 60 }, icon: 'led_strip.svg',
@@ -10,6 +10,8 @@ export const led_strip: DeviceMod = {
     { key: 'powerPerMeter', label: 'Мощность (Вт/м)', type: 'number', default: 14.4 },
     { key: 'length', label: 'Длина (м)', type: 'number', default: 5 },
     { key: 'nominalVoltage', label: 'Напряжение (В)', type: 'number', default: 12 },
+    { key: 'grounded', label: 'Заземлён', type: 'boolean', default: true },
+    { key: 'leakage', label: 'Утечка (мА)', type: 'number', default: 0 },
   ],
   stamp({ comp, node }) {
     const a = node('V+'), b = node('V-');
@@ -40,6 +42,10 @@ export const led_strip: DeviceMod = {
       reason = ' (>' + (vNom * 1.1).toFixed(0) + 'В)';
     }
 
-    return { visual: { glow: ratio * 0.5, warning, label: label + reason } };
+    const events: any[] = [];
+    if (warning) {
+      events.push({ type: 'overload', message: 'СД-лента: ' + (reason || 'перенапряжение'), target: { compId: comp.id } });
+    }
+    return { visual: { glow: ratio * 0.5, warning, label: label + reason }, events };
   },
 };

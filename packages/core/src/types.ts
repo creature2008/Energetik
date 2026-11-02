@@ -20,6 +20,8 @@ export type Wire = {
   to: { compId: string; pinId: string };
   color: string;
   crossSection: number;
+  length?: number;
+  material?: 'copper' | 'aluminum';
   waypoints: Point[];
   routing: 'auto45' | 'manual';
 };

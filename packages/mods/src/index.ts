@@ -1,4 +1,4 @@
-﻿import { registry } from '@electro/core';
+import { registry } from '@electro/core';
 import { supply } from './supply';
 import { supply_3ph } from './supply_3ph';
 import { supply_3ph_delta } from './supply_3ph_delta';
@@ -6,6 +6,7 @@ import { supply_us_2ph } from './supply_us_2ph';
 import { lamp } from './lamp';
 import { led_strip } from './led_strip';
 import { breaker_1p, breaker_2p, breaker_3p, breaker_4p } from './breaker';
+import { rcd_2p, rcd_4p, dif_2p, dif_4p } from './rcd';
 import { switch_1, switch_2, switch_3 } from './switch';
 import {
   socket_10a_pe, socket_10a,
@@ -29,6 +30,10 @@ export function registerAllMods() {
   registry.register(breaker_2p);
   registry.register(breaker_3p);
   registry.register(breaker_4p);
+  registry.register(rcd_2p);
+  registry.register(rcd_4p);
+  registry.register(dif_2p);
+  registry.register(dif_4p);
   registry.register(switch_1);
   registry.register(switch_2);
   registry.register(switch_3);
