@@ -1,4 +1,6 @@
-import type { DeviceMod } from '@electro/core';
+﻿import type { DeviceMod } from '@electro/core';
+import { windingImpedance } from '../_shared/motorModel';
+
 export const motor_3ph: DeviceMod = {
   id: 'motor_3ph', name: 'Мотор 3-ф', category: 'motors',
   size: { w: 80, h: 60 }, icon: 'motor_3ph.svg',
@@ -10,6 +12,8 @@ export const motor_3ph: DeviceMod = {
   ],
   params: [
     { key: 'power', label: 'Мощность (Вт)', type: 'number', default: 3000 },
+    { key: 'efficiency', label: 'КПД (%)', type: 'number', default: 88 },
+    { key: 'cosPhi', label: 'cos φ', type: 'number', default: 0.85 },
     { key: 'connection', label: 'Схема', type: 'select', default: 'Y', options: [
       { value: 'Y', label: 'Звезда (Y)' },
       { value: 'D', label: 'Треугольник (Δ)' },
@@ -19,36 +23,43 @@ export const motor_3ph: DeviceMod = {
     { key: 'leakage', label: 'Утечка (мА)', type: 'number', default: 0 },
   ],
   stamp({ comp, node }) {
-    const Pphase = comp.params.power / 3;
+    const isY = comp.params.connection !== 'D';
+    // Для Y: U_лин = 380, U_обм = 380/√3 = 220
+    // Для Δ: U_лин = 380, U_обм = 380
+    const Uw = isY ? 380 / Math.sqrt(3) : 380;
+    const { R, L } = windingImpedance({
+      Pout: comp.params.power || 3000,
+      eta: (comp.params.efficiency || 88) / 100,
+      cosPhi: comp.params.cosPhi || 0.85,
+      Uw,
+      phases: 3,
+    });
+
     const els: any[] = [];
-    if (comp.params.connection === 'D') {
-      // Треугольник: обмотки между фазами, 380В на каждой
-      const R = (380 * 380) / Pphase;
-      const pairs: [string, string][] = [['L1', 'L2'], ['L2', 'L3'], ['L3', 'L1']];
-      for (const [a, b] of pairs) {
-        const na = node(a), nb = node(b);
-        if (na != null && nb != null) els.push({ type: 'resistor', nodeA: na, nodeB: nb, R });
-      }
-    } else {
-      // Звезда: обмотки от фаз к N, 220В на каждой
-      const R = (220 * 220) / Pphase;
+    if (isY) {
       const nN = node('N');
       if (nN == null) return [];
       for (const ph of ['L1', 'L2', 'L3']) {
         const a = node(ph);
-        if (a != null) els.push({ type: 'resistor', nodeA: a, nodeB: nN, R });
+        if (a != null) els.push({ type: 'inductor', nodeA: a, nodeB: nN, L, esr: R });
+      }
+    } else {
+      const pairs: [string, string][] = [['L1', 'L2'], ['L2', 'L3'], ['L3', 'L1']];
+      for (const [p1, p2] of pairs) {
+        const a = node(p1), b = node(p2);
+        if (a != null && b != null) els.push({ type: 'inductor', nodeA: a, nodeB: b, L, esr: R });
       }
     }
     return els;
   },
   evaluate({ volts, comp }) {
-    const isDelta = comp.params.connection === 'D';
-    let dv: number;
-    if (isDelta) {
-      dv = (Math.abs(volts('L1', 'L2')) + Math.abs(volts('L2', 'L3')) + Math.abs(volts('L3', 'L1'))) / 3;
+    const isY = comp.params.connection !== 'D';
+    let avg: number;
+    if (isY) {
+      avg = (Math.abs(volts('L1', 'N')) + Math.abs(volts('L2', 'N')) + Math.abs(volts('L3', 'N'))) / 3;
     } else {
-      dv = (Math.abs(volts('L1', 'N')) + Math.abs(volts('L2', 'N')) + Math.abs(volts('L3', 'N'))) / 3;
+      avg = (Math.abs(volts('L1', 'L2')) + Math.abs(volts('L2', 'L3')) + Math.abs(volts('L3', 'L1'))) / 3;
     }
-    return { visual: { spinning: dv > 50 } };
+    return { visual: { spinning: avg > 50 } };
   },
 };

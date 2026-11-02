@@ -1,5 +1,7 @@
 ﻿export type MnaElement =
   | { type: 'resistor'; nodeA: number; nodeB: number; R: number; tag?: string }
+  | { type: 'inductor'; nodeA: number; nodeB: number; L: number; esr: number; tag?: string }
+  | { type: 'capacitor'; nodeA: number; nodeB: number; C: number; esr: number; tag?: string }
   | { type: 'voltageSource'; nodeA: number; nodeB: number; rms: number; phaseDeg?: number; freq: number; tag?: string };
 
 export type MnaResult = {
@@ -86,6 +88,26 @@ function splitIslands(nodeCount: number, elements: MnaElement[]): Island[] {
   return Array.from(byRoot.values());
 }
 
+// Комплексная проводимость ветви на частоте w (рад/с)
+function admittance(el: MnaElement, w: number): [number, number] | null {
+  const RMIN = 1e-4;
+  let R = 0, X = 0;
+  if (el.type === 'resistor') {
+    R = Math.max(el.R, RMIN);
+  } else if (el.type === 'inductor') {
+    R = Math.max(el.esr, RMIN);
+    X = w * el.L;
+  } else if (el.type === 'capacitor') {
+    if (w === 0) return null;  // DC: конденсатор = разрыв
+    R = Math.max(el.esr, RMIN);
+    X = -1 / (w * el.C);
+  } else {
+    return null;  // voltageSource обрабатывается отдельно
+  }
+  const d = R * R + X * X;
+  return [R / d, -X / d];
+}
+
 export function solveIslands(nodeCount: number, elements: MnaElement[]): MnaResult {
   const vRe = new Float64Array(nodeCount);
   const vIm = new Float64Array(nodeCount);
@@ -116,18 +138,10 @@ export function solveIslands(nodeCount: number, elements: MnaElement[]): MnaResu
 
     let vsIdx = 0;
     const vsRow = new Map<number, number>();
+    const w = 2 * Math.PI * isl.freq;
 
-    elems.forEach((el, idx) => {
-      if (el.type === 'resistor') {
-        const g = 1 / Math.max(el.R, 1e-4);
-        const a = el.nodeA, b = el.nodeB;
-        if (a < isl.nodes.length) Ar[a * n + a] += g;
-        if (b < isl.nodes.length) Ar[b * n + b] += g;
-        if (a < isl.nodes.length && b < isl.nodes.length) {
-          Ar[a * n + b] -= g;
-          Ar[b * n + a] -= g;
-        }
-      } else if (el.type === 'voltageSource') {
+    elems.forEach((el) => {
+      if (el.type === 'voltageSource') {
         const row = isl.nodes.length + vsIdx;
         vsRow.set(el._gi, row);
         vsIdx++;
@@ -137,10 +151,24 @@ export function solveIslands(nodeCount: number, elements: MnaElement[]): MnaResu
         const phaseRad = ((el.phaseDeg || 0) * Math.PI) / 180;
         br[row] = el.rms * Math.cos(phaseRad);
         bi[row] = el.rms * Math.sin(phaseRad);
+      } else {
+        const Y = admittance(el, w);
+        if (!Y) return;
+        const [gre, gim] = Y;
+        const a = el.nodeA, b = el.nodeB;
+        if (a < isl.nodes.length) {
+          Ar[a * n + a] += gre; Ai[a * n + a] += gim;
+        }
+        if (b < isl.nodes.length) {
+          Ar[b * n + b] += gre; Ai[b * n + b] += gim;
+        }
+        if (a < isl.nodes.length && b < isl.nodes.length) {
+          Ar[a * n + b] -= gre; Ai[a * n + b] -= gim;
+          Ar[b * n + a] -= gre; Ai[b * n + a] -= gim;
+        }
       }
     });
 
-    // Земля = nodeB первого источника
     const vs = elems.find(e => e.type === 'voltageSource');
     if (vs) {
       const ground = vs.nodeB;
@@ -158,18 +186,21 @@ export function solveIslands(nodeCount: number, elements: MnaElement[]): MnaResu
     });
 
     elems.forEach(el => {
-      if (el.type === 'resistor') {
-        const vaRe = xr[el.nodeA] ?? 0, vaIm = xi[el.nodeA] ?? 0;
-        const vbRe = xr[el.nodeB] ?? 0, vbIm = xi[el.nodeB] ?? 0;
-        const g = 1 / Math.max(el.R, 1e-4);
-        iRe[el._gi] = (vaRe - vbRe) * g;
-        iIm[el._gi] = (vaIm - vbIm) * g;
-      } else {
+      if (el.type === 'voltageSource') {
         const row = vsRow.get(el._gi);
         if (row !== undefined) {
           iRe[el._gi] = xr[row];
           iIm[el._gi] = xi[row];
         }
+      } else {
+        const Y = admittance(el, w);
+        if (!Y) return;
+        const [gre, gim] = Y;
+        const vaRe = xr[el.nodeA] ?? 0, vaIm = xi[el.nodeA] ?? 0;
+        const vbRe = xr[el.nodeB] ?? 0, vbIm = xi[el.nodeB] ?? 0;
+        const dvRe = vaRe - vbRe, dvIm = vaIm - vbIm;
+        iRe[el._gi] = dvRe * gre - dvIm * gim;
+        iIm[el._gi] = dvRe * gim + dvIm * gre;
       }
     });
   }
