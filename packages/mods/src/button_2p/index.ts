@@ -12,8 +12,8 @@ export const button_2p: DeviceMod = {
   buttonFace: { x: 30, y: 50, r: 15 },
   hotspot: { x: 15, y: 35, w: 30, h: 30 },
   pins: [
-    { id: 'P1A', label: 'A', side: 'top',    color: '#888' },
-    { id: 'P1B', label: 'B', side: 'bottom', color: '#888' },
+    { id: 'P1A', label: '1', side: 'top',    color: '#888' },
+    { id: 'P1B', label: '2', side: 'bottom', color: '#888' },
   ],
   params: [
     { key: 'contactType', label: 'Контакт', type: 'select', default: 'NC', options: [

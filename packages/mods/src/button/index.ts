@@ -12,10 +12,10 @@ export const button: DeviceMod = {
   buttonFace: { x: 35, y: 55, r: 15 },
   hotspot: { x: 20, y: 40, w: 30, h: 30 },
   pins: [
-    { id: 'P1A', label: '1A', side: 'top',    color: '#888' },
-    { id: 'P1B', label: '1B', side: 'top',    color: '#888' },
-    { id: 'P2A', label: '2A', side: 'bottom', color: '#888' },
-    { id: 'P2B', label: '2B', side: 'bottom', color: '#888' },
+    { id: 'P1A', label: '1', side: 'top',    color: '#888' },
+    { id: 'P1B', label: '1', side: 'top',    color: '#888' },
+    { id: 'P2A', label: '2', side: 'bottom', color: '#888' },
+    { id: 'P2B', label: '2', side: 'bottom', color: '#888' },
   ],
   params: [
     { key: 'contact1Type', label: 'Пара 1', type: 'select', default: 'NC', options: [
