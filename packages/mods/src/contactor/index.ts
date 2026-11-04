@@ -3,6 +3,8 @@ import type { DeviceMod } from '@electro/core';
 export const contactor: DeviceMod = {
   id: 'contactor', name: 'Контактор', category: 'automation',
   size: { w: 90, h: 140 }, icon: 'contactor.svg',
+  ledPos: { x: 45, y: 90 },
+  hotspot: { x: 30, y: 52, w: 30, h: 18 },
   pins: [
     { id: 'L1', label: '1L1', side: 'top',    color: '#fff' },
     { id: 'L2', label: '3L2', side: 'top',    color: '#fff' },
@@ -21,9 +23,8 @@ export const contactor: DeviceMod = {
       { value: 380, label: '380 В AC' },
     ]},
     { key: 'ratedCurrent', label: 'Номинал (А)', type: 'select', default: 25, options: [
-      { value: 9,  label: '9 А' }, { value: 12, label: '12 А' },
-      { value: 18, label: '18 А' }, { value: 25, label: '25 А' },
-      { value: 32, label: '32 А' }, { value: 40, label: '40 А' },
+      { value: 9, label: '9 А' }, { value: 12, label: '12 А' }, { value: 18, label: '18 А' },
+      { value: 25, label: '25 А' }, { value: 32, label: '32 А' }, { value: 40, label: '40 А' },
       { value: 63, label: '63 А' },
     ]},
     { key: 'contactType', label: 'Контакт', type: 'select', default: 'NO', options: [
@@ -41,15 +42,13 @@ export const contactor: DeviceMod = {
     const a1 = node('A1'), a2 = node('A2');
     if (a1 !== null && a2 !== null) {
       const u = Number(comp.params.coilVoltage) || 220;
-      const coilR = (u * u) / 10;
-      els.push({ type: 'resistor', nodeA: a1, nodeB: a2, R: coilR });
+      els.push({ type: 'resistor', nodeA: a1, nodeB: a2, R: (u * u) / 10 });
     }
     const engaged = comp.params._engaged === true;
     const isNC = comp.params.contactType === 'NC';
     const closed = isNC ? !engaged : engaged;
     if (closed) {
-      const pairs: Array<[string, string]> = [['L1','T1'], ['L2','T2'], ['L3','T3']];
-      for (const [ip, op] of pairs) {
+      for (const [ip, op] of [['L1','T1'], ['L2','T2'], ['L3','T3']] as const) {
         const a = node(ip), b = node(op);
         if (a !== null && b !== null) els.push({ type: 'resistor', nodeA: a, nodeB: b, R: 0.001 });
       }
@@ -65,21 +64,14 @@ export const contactor: DeviceMod = {
     if (ovr === 1) engaged = true;
     else if (ovr === 2) engaged = false;
     else engaged = coilEnergized;
-    const isNC = comp.params.contactType === 'NC';
-    const closed = isNC ? !engaged : engaged;
+    const closed = comp.params.contactType === 'NC' ? !engaged : engaged;
     const rated = Number(comp.params.ratedCurrent) || 25;
     const isOverloaded = closed && current > rated;
-    let label: string;
-    if (ovr === 1) label = 'ВКЛ (ручн)';
-    else if (ovr === 2) label = 'ВЫКЛ (ручн)';
-    else label = engaged ? 'ВКЛ' : 'ВЫКЛ';
+    const ledColor: 'green' | 'red' | 'gray' =
+      isOverloaded ? 'red' : (closed ? 'green' : 'gray');
     return {
       setParams: { _engaged: engaged },
-      visual: {
-        tint: closed ? '#2ecc71' : '#666',
-        warning: isOverloaded,
-        label,
-      },
+      visual: { warning: isOverloaded, ledColor, toggleParam: '_manualOverride' },
     };
   },
 };

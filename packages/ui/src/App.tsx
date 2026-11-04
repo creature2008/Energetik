@@ -651,10 +651,6 @@ function App() {
                       if (e.evt.ctrlKey || e.evt.shiftKey) { toggleSelection(comp.id); return; }
                       setSelection([comp.id], []);
                       setSelectedCompId(comp.id); setWireMenuPos(null);
-                      if (comp.deviceId === 'contactor') {
-                        const cur = Number(comp.params._manualOverride) || 0;
-                        updateComponentParam(comp.id, '_manualOverride', cur === 0 ? 1 : 0);
-                      }
                     }}
                     onDragMove={(e) => { e.target.x(snap(e.target.x())); e.target.y(snap(e.target.y())); }}
                     onDragEnd={(e) => { e.cancelBubble = true; updatePosition(comp.id, e.target.x(), e.target.y()); }}>
@@ -735,6 +731,51 @@ function App() {
                     ) : null}
 
                     {spinning === true ? <Arc x={mod.size.w/2} y={mod.size.h/2} innerRadius={10} outerRadius={25} angle={90} rotation={rotation} fill="#f1c40f" opacity={0.8} listening={false} /> : null}
+
+                    {/* LED индикатор */}
+                    {(mod as any).ledPos && visual?.ledColor && (
+                      <Circle
+                        x={(mod as any).ledPos.x}
+                        y={(mod as any).ledPos.y}
+                        radius={4}
+                        fill={
+                          visual.ledColor === 'green' ? '#2ecc71'
+                          : visual.ledColor === 'red' ? '#e74c3c'
+                          : visual.ledColor === 'yellow' ? '#f1c40f'
+                          : '#555'
+                        }
+                        shadowColor={visual.ledColor === 'green' ? '#2ecc71' : (visual.ledColor === 'red' ? '#e74c3c' : undefined)}
+                        shadowBlur={visual.ledColor !== 'gray' ? 8 : 0}
+                        listening={false}
+                      />
+                    )}
+
+                    {/* Кликабельный hotspot */}
+                    {(mod as any).buttonFace && visual?.buttonFaceColor && (
+                      <Group x={(mod as any).buttonFace.x} y={(mod as any).buttonFace.y} listening={false}>
+                        <Circle radius={(mod as any).buttonFace.r} fill={visual.buttonFaceColor} stroke="#111" strokeWidth={1.5} />
+                        <Circle radius={(mod as any).buttonFace.r - 3} fill={visual.buttonFaceColor} opacity={0.8} stroke="#000" strokeWidth={0.8} />
+                        <Circle x={-(mod as any).buttonFace.r * 0.3} y={-(mod as any).buttonFace.r * 0.3} radius={(mod as any).buttonFace.r * 0.25} fill="#fff" opacity={0.35} />
+                      </Group>
+                    )}
+
+                    {(mod as any).hotspot && visual?.toggleParam && (
+                      <Rect
+                        x={(mod as any).hotspot.x}
+                        y={(mod as any).hotspot.y}
+                        width={(mod as any).hotspot.w}
+                        height={(mod as any).hotspot.h}
+                        fill="transparent"
+                        onClick={(e) => {
+                          e.cancelBubble = true;
+                          if (e.evt.button !== 0) return;
+                          setSelectedCompId(comp.id);
+                          setSelection([comp.id], []);
+                          const cur = comp.params[visual.toggleParam!];
+                          updateComponentParam(comp.id, visual.toggleParam!, !cur);
+                        }}
+                      />
+                    )}
                     {visual?.warning && !isSwitch && !isBreaker ? (
                       <Group x={mod.size.w - 8} y={8} listening={false}>
                         <Circle radius={9} fill="#e74c3c" stroke="#fff" strokeWidth={1.5} />

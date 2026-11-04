@@ -32,7 +32,10 @@ export interface Visual {
   spinning?: boolean;
   label?: string;
   tint?: string;
-  warning?: boolean;
+warning?: boolean;
+  ledColor?: 'green' | 'red' | 'yellow' | 'gray';
+  toggleParam?: string;
+  buttonFaceColor?: string;
 }
 
 export type SimEvent = {
@@ -52,6 +55,9 @@ export interface DeviceMod {
   name: string;
   category: string;
   size: { w: number; h: number };
+  ledPos?: { x: number; y: number };
+  hotspot?: { x: number; y: number; w: number; h: number };
+  buttonFace?: { x: number; y: number; r: number };
   icon?: string;
   pins: PinDef[];
   params: ParamDef[];
