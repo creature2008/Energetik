@@ -1,0 +1,43 @@
+<svg width="90" height="140" viewBox="0 0 90 140" xmlns="http://www.w3.org/2000/svg">
+  <!-- Корпус (тёмный, как на фото) -->
+  <rect x="3" y="3" width="84" height="134" rx="3" fill="#2a2a2a" stroke="#0a0a0a" stroke-width="1.5"/>
+  <!-- Верхняя белая панель с клеммами -->
+  <rect x="5" y="5" width="80" height="28" fill="#e8e8e8" stroke="#888" stroke-width="0.8"/>
+  <!-- Верхние терминалы с подписями -->
+  <circle cx="14" cy="18" r="4.5" fill="#999" stroke="#333" stroke-width="0.8"/>
+  <circle cx="14" cy="18" r="2" fill="#333"/>
+  <circle cx="36" cy="18" r="4.5" fill="#999" stroke="#333" stroke-width="0.8"/>
+  <circle cx="36" cy="18" r="2" fill="#333"/>
+  <circle cx="58" cy="18" r="4.5" fill="#999" stroke="#333" stroke-width="0.8"/>
+  <circle cx="58" cy="18" r="2" fill="#333"/>
+  <circle cx="80" cy="18" r="4.5" fill="#999" stroke="#333" stroke-width="0.8"/>
+  <circle cx="80" cy="18" r="2" fill="#333"/>
+  <text x="14" y="10" font-size="4" text-anchor="middle" fill="#333" font-weight="bold">1L1</text>
+  <text x="36" y="10" font-size="4" text-anchor="middle" fill="#333" font-weight="bold">3L2</text>
+  <text x="58" y="10" font-size="4" text-anchor="middle" fill="#333" font-weight="bold">5L3</text>
+  <text x="80" y="10" font-size="4" text-anchor="middle" fill="#333" font-weight="bold">A1</text>
+  <!-- Синяя этикетка -->
+  <rect x="8" y="35" width="74" height="10" fill="#2980b9" opacity="0.9"/>
+  <text x="45" y="42.5" font-size="5" text-anchor="middle" fill="#fff" font-weight="bold">КМИ 10910</text>
+  <!-- Центральные жёлтые кнопки -->
+  <rect x="25" y="55" width="18" height="16" rx="1.5" fill="#f1c40f" stroke="#8a6900" stroke-width="1"/>
+  <rect x="47" y="55" width="18" height="16" rx="1.5" fill="#f1c40f" stroke="#8a6900" stroke-width="1"/>
+  <text x="34" y="66" font-size="6" text-anchor="middle" fill="#333" font-weight="bold">TEST</text>
+  <text x="56" y="66" font-size="6" text-anchor="middle" fill="#333" font-weight="bold">RESET</text>
+  <!-- Белая полоса-ручка снизу центра -->
+  <rect x="22" y="78" width="46" height="8" rx="1" fill="#ddd" stroke="#888" stroke-width="0.8"/>
+  <!-- Нижняя белая панель с клеммами -->
+  <rect x="5" y="107" width="80" height="28" fill="#e8e8e8" stroke="#888" stroke-width="0.8"/>
+  <circle cx="14" cy="122" r="4.5" fill="#999" stroke="#333" stroke-width="0.8"/>
+  <circle cx="14" cy="122" r="2" fill="#333"/>
+  <circle cx="36" cy="122" r="4.5" fill="#999" stroke="#333" stroke-width="0.8"/>
+  <circle cx="36" cy="122" r="2" fill="#333"/>
+  <circle cx="58" cy="122" r="4.5" fill="#999" stroke="#333" stroke-width="0.8"/>
+  <circle cx="58" cy="122" r="2" fill="#333"/>
+  <circle cx="80" cy="122" r="4.5" fill="#999" stroke="#333" stroke-width="0.8"/>
+  <circle cx="80" cy="122" r="2" fill="#333"/>
+  <text x="14" y="136" font-size="4" text-anchor="middle" fill="#333" font-weight="bold">2T1</text>
+  <text x="36" y="136" font-size="4" text-anchor="middle" fill="#333" font-weight="bold">4T2</text>
+  <text x="58" y="136" font-size="4" text-anchor="middle" fill="#333" font-weight="bold">6T3</text>
+  <text x="80" y="136" font-size="4" text-anchor="middle" fill="#333" font-weight="bold">A2</text>
+</svg>

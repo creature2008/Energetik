@@ -13,7 +13,7 @@ registerAllMods();
 
 const GRID_SIZE = 10;
 const CATEGORY_NAMES: Record<string, string> = {
-  power: '⚡ Питание', protection: '🛑 Защита', light: '💡 Свет', sockets: '🔌 Розетки',
+  power: '⚡ Питание', protection: '🛑 Защита', automation: '⚙️ Автоматика', light: '💡 Свет', sockets: '🔌 Розетки',
   switches: '🔘 Выключатели', psu: '🔋 Блоки питания', motors: '⚙️ Моторы', boxes: '📦 Разное',
 };
 
@@ -648,14 +648,13 @@ function App() {
                   <Group key={comp.id} x={comp.x} y={comp.y} draggable
                     onClick={(e) => {
                       e.cancelBubble = true;
-                      if (e.evt.ctrlKey || e.evt.shiftKey) toggleSelection(comp.id);
-                      else setSelection([comp.id], []);
-                      setSelectedCompId(comp.id); setWireMenuPos(null); setCompMenuPos(null);
-                    }}
-                    onContextMenu={(e) => {
-                      e.evt.preventDefault(); e.cancelBubble = true;
-                      setCompMenuPos({ x: comp.x + mod.size.w + 5, y: comp.y, compId: comp.id });
+                      if (e.evt.ctrlKey || e.evt.shiftKey) { toggleSelection(comp.id); return; }
+                      setSelection([comp.id], []);
                       setSelectedCompId(comp.id); setWireMenuPos(null);
+                      if (comp.deviceId === 'contactor') {
+                        const cur = Number(comp.params._manualOverride) || 0;
+                        updateComponentParam(comp.id, '_manualOverride', cur === 0 ? 1 : 0);
+                      }
                     }}
                     onDragMove={(e) => { e.target.x(snap(e.target.x())); e.target.y(snap(e.target.y())); }}
                     onDragEnd={(e) => { e.cancelBubble = true; updatePosition(comp.id, e.target.x(), e.target.y()); }}>
@@ -806,12 +805,6 @@ function App() {
             </div>
           ) : null}
 
-          {compMenuPos ? (
-            <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute', left: compMenuPos.x, top: compMenuPos.y, background: '#333', border: '1px solid #555', borderRadius: '6px', padding: '8px', zIndex: 100, display: 'flex', flexDirection: 'column', gap: '5px' }}>
-              <button onClick={() => { removeComponent(compMenuPos.compId); setCompMenuPos(null); setSelectedCompId(null); }} style={{ background: '#c0392b', color: '#fff', border: 'none', padding: '6px 14px', cursor: 'pointer', fontSize: '12px', borderRadius: '3px' }}>🗑 Удалить</button>
-              <button onClick={() => setCompMenuPos(null)} style={{ background: '#555', color: '#fff', border: 'none', padding: '4px 8px', cursor: 'pointer', fontSize: '11px', borderRadius: '3px' }}>Отмена</button>
-            </div>
-          ) : null}
 
           {wireMenuPos && selectedWireId ? (() => {
             const w = wires.find(x => x.id === selectedWireId); if (!w) return null;
