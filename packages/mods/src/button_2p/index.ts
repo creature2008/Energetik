@@ -6,7 +6,9 @@ const COLOR_MAP: Record<string, string> = {
 };
 
 export const button_2p: DeviceMod = {
-  id: 'button_2p', name: 'Кнопка 1 пара', category: 'automation',
+  id: 'button_2p',
+  description: 'Кнопка с одной парой контактов — простая ПУСК или СТОП.',
+  usage: 'Параметр «Контакт»: НО (замкнут только при нажатии) — для ПУСК/звонка; НЗ (разомкнут при нажатии) — для СТОП/аварийной остановки. Клик по кнопке = нажатие. По IEC: красный СТОП, зелёный ПУСК, чёрный общий.', name: 'Кнопка 1 пара', category: 'automation',
   size: { w: 60, h: 90 }, icon: 'button_2p.svg',
   ledPos: { x: 30, y: 25 },
   buttonFace: { x: 30, y: 50, r: 15 },

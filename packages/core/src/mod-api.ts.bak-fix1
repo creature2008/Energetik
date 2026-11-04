@@ -1,0 +1,70 @@
+export type { MnaElement } from './sim/mna';
+import type { MnaElement } from './sim/mna';
+
+export type PinDef = { id: string; label: string; side: 'left' | 'right' | 'top' | 'bottom'; color?: string };
+
+export type ParamDef = {
+  key: string; label: string; type: 'number' | 'select' | 'boolean' | 'loads';
+  default: number | string | boolean | any[];
+  options?: { value: string | number; label: string; power?: number }[];
+};
+
+export interface StampCtx {
+  comp: { id: string; params: Record<string, any> };
+  node(pinId: string): number | null;
+  supplyVoltage: number;
+}
+
+export interface EvalCtx {
+  comp: { id: string; params: Record<string, any> };
+  volts(a: string, b: string): number;
+  current: number;
+  sumCurrent: number;
+  isIsolated(a: string, b: string): boolean;
+  pinCurrent(pinId: string): number;
+  pinCurrentComplex(pinId: string): { re: number; im: number };
+  signedVolts(a: string, b: string): number;
+  isAC: boolean;
+}
+
+export interface Visual {
+  glow?: number;
+  spinning?: boolean;
+  label?: string;
+  tint?: string;
+warning?: boolean;
+  ledColor?: 'green' | 'red' | 'yellow' | 'gray';
+  toggleParam?: string;
+  buttonFaceColor?: string;
+}
+
+export type SimEvent = {
+  type: 'short-circuit' | 'overload' | 'tripped' | 'burnt' | 'info';
+  message: string;
+  target?: { compId?: string; wireId?: string };
+};
+
+export type EvalResult = {
+  events?: SimEvent[];
+  setParams?: Record<string, any>;
+  visual?: Visual;
+};
+
+export interface DeviceMod {
+  id: string;
+
+  description?: string;
+  usage?: string;
+  category: string;
+  size: { w: number; h: number };
+  ledPos?: { x: number; y: number };
+  hotspot?: { x: number; y: number; w: number; h: number };
+  buttonFace?: { x: number; y: number; r: number };
+  icon?: string;
+  pins: PinDef[];
+  params: ParamDef[];
+  isSource?: boolean;
+  neutralPin?: string;
+  stamp(ctx: StampCtx): MnaElement[];
+  evaluate?(ctx: EvalCtx): EvalResult;
+}

@@ -1,0 +1,8 @@
+<svg width="60" height="80" viewBox="0 0 60 80" xmlns="http://www.w3.org/2000/svg">
+  <rect x="3" y="3" width="54" height="74" rx="2" fill="#d8d8d8" stroke="#555" stroke-width="1.5"/>
+  <rect x="8" y="8" width="44" height="20" rx="1" fill="#333" stroke="#111"/>
+  <text x="30" y="21" font-size="6" text-anchor="middle" fill="#f1c40f" font-weight="bold">REL</text>
+  <circle cx="30" cy="38" r="4" fill="#555" stroke="#111" stroke-width="1"/>
+  <text x="30" y="52" font-size="5" text-anchor="middle" fill="#666" font-weight="bold">РП</text>
+  <rect x="10" y="60" width="40" height="10" rx="1" fill="#a8a8a8" stroke="#666" stroke-width="0.8"/>
+</svg>

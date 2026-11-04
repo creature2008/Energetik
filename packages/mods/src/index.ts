@@ -10,6 +10,9 @@ import { rcd_2p, rcd_4p, dif_2p, dif_4p } from './rcd';
 import { contactor } from './contactor';
 import { button } from './button';
 import { button_2p } from './button_2p';
+import { relay } from './relay';
+import { timer_relay } from './timer_relay';
+import { signal_lamp } from './signal_lamp';
 import { switch_1, switch_2, switch_3 } from './switch';
 import {
   socket_10a_pe, socket_10a,
@@ -40,6 +43,9 @@ export function registerAllMods() {
   registry.register(contactor);
   registry.register(button);
   registry.register(button_2p);
+  registry.register(relay);
+  registry.register(timer_relay);
+  registry.register(signal_lamp);
   registry.register(switch_1);
   registry.register(switch_2);
   registry.register(switch_3);

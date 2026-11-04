@@ -1,7 +1,9 @@
 import type { DeviceMod } from '@electro/core';
 
 export const contactor: DeviceMod = {
-  id: 'contactor', name: 'Контактор', category: 'automation',
+  id: 'contactor',
+  description: 'Контактор — силовое реле для коммутации мощной нагрузки (двигатели, ТЭНы) слабым сигналом.',
+  usage: 'Подайте 220/380 В (или 12/24 DC) на A1/A2 — катушка сработает, силовые контакты L1-L3 замкнутся на T1-T3. Через них идёт ток до номинала. Ручной режим (TEST на корпусе) — для теста без катушки. Применение: пускатель двигателя, самоблокировка, управление освещением из нескольких мест.', name: 'Контактор', category: 'automation',
   size: { w: 90, h: 140 }, icon: 'contactor.svg',
   ledPos: { x: 45, y: 90 },
   hotspot: { x: 30, y: 52, w: 30, h: 18 },

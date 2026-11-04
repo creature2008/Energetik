@@ -50,6 +50,18 @@ function App() {
 
   const [showCalculator, setShowCalculator] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [docsOpen, setDocsOpen] = useState(true);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail && detail.compId) {
+        updateComponentParam(detail.compId, '_triggered', true);
+      }
+    };
+    window.addEventListener('electro:timer-fire', handler);
+    return () => window.removeEventListener('electro:timer-fire', handler);
+  }, []);
   const [openCategories, setOpenCategories] = useState<string[]>(['power']);
   const [stagePos, setStagePos] = useState({ x: 0, y: 0 });
   const [stageScale, setStageScale] = useState(1);
@@ -878,8 +890,31 @@ function App() {
             const comp = components.find(c => c.id === selectedCompId); if (!comp) return null;
             const mod = registry.get(comp.deviceId);
             return (
-              <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute', right: '20px', top: '20px', background: '#252526', border: '1px solid #444', padding: '12px', borderRadius: '8px', color: '#fff', zIndex: 100, minWidth: '200px' }}>
+              <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute', right: '20px', top: '20px', background: '#252526', border: '1px solid #444', padding: '12px', borderRadius: '8px', color: '#fff', zIndex: 100, minWidth: '200px', maxWidth: '320px', maxHeight: '80vh', overflowY: 'auto' }}>
                 <h4 style={{ marginBottom: '8px', fontSize: '14px' }}>{mod?.name || comp.deviceId}</h4>
+                {mod?.description && (
+                  <div style={{ marginBottom: '10px', background: '#1e1e1e', border: '1px solid #444', borderRadius: '4px', fontSize: '11px' }}>
+                    <div
+                      onClick={() => setDocsOpen(!docsOpen)}
+                      style={{ padding: '6px 8px', cursor: 'pointer', userSelect: 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#9b59b6', fontWeight: 'bold' }}
+                    >
+                      <span>ℹ️ Что это</span>
+                      <span style={{ fontSize: '10px', color: '#888' }}>{docsOpen ? '▼' : '▶'}</span>
+                    </div>
+                    {docsOpen && (
+                      <div style={{ padding: '6px 8px', borderTop: '1px solid #333' }}>
+                        <div style={{ color: '#ddd', lineHeight: '1.4', marginBottom: mod.usage ? '6px' : 0 }}>
+                          {mod.description}
+                        </div>
+                        {mod.usage && (
+                          <div style={{ color: '#aaa', lineHeight: '1.4' }}>
+                            {mod.usage}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
                 {renderInspectorFields(comp)}
                 <button onClick={() => setSelectedCompId(null)} style={{ background: '#555', color: '#fff', border: 'none', padding: '4px 8px', cursor: 'pointer', width: '100%', fontSize: '12px', marginTop: '5px' }}>Закрыть</button>
               </div>

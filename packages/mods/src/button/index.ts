@@ -6,7 +6,9 @@ const COLOR_MAP: Record<string, string> = {
 };
 
 export const button: DeviceMod = {
-  id: 'button', name: 'Кнопка 2 пары', category: 'automation',
+  id: 'button',
+  description: 'Кнопка с двумя независимыми парами контактов — можно комбинировать НО и НЗ (например, ПУСК + СТОП в одной кнопке).',
+  usage: 'Пара 1 и Пара 2 настраиваются независимо: НО (замкнут только при нажатии) или НЗ (разомкнут при нажатии). Клик по грибу = нажатие. По IEC: красный — СТОП, зелёный — ПУСК, чёрный — общий.', name: 'Кнопка 2 пары', category: 'automation',
   size: { w: 70, h: 100 }, icon: 'button.svg',
   ledPos: { x: 35, y: 32 },
   buttonFace: { x: 35, y: 55, r: 15 },

@@ -53,6 +53,9 @@ export type EvalResult = {
 export interface DeviceMod {
   id: string;
   name: string;
+
+  description?: string;
+  usage?: string;
   category: string;
   size: { w: number; h: number };
   ledPos?: { x: number; y: number };
