@@ -1,6 +1,6 @@
 import { Project } from '../types';
 import { buildNetlist } from '../netlist';
-import { solveIslands, MnaElement } from './mna';
+import { solveIslands, MnaElement, type MnaResult } from './mna';
 import { registry } from '../registry';
 import type { SimEvent, Visual } from '../mod-api';
 
@@ -24,6 +24,7 @@ export type SimulationResult = {
 };
 
 export function runSimulation(project: Project): SimulationResult {
+  project = structuredClone(project);
   const nets = buildNetlist(project);
   const netIndex = new Map<string, number>();
   nets.forEach((net, i) => netIndex.set(net.id, i));
@@ -42,7 +43,7 @@ export function runSimulation(project: Project): SimulationResult {
   const updatedParams = new Map<string, Record<string, any>>();
   const debugLogs: string[] = [];
 
-  let lastResult = { vRe: new Float64Array(0), vIm: new Float64Array(0), iRe: new Float64Array(0), iIm: new Float64Array(0), islandOf: new Int32Array(0), islandFreq: [] as number[] };
+  let lastResult: MnaResult = { vRe: new Float64Array(0), vIm: new Float64Array(0), iRe: new Float64Array(0), iIm: new Float64Array(0), islandOf: new Int32Array(0), islandFreq: [] as number[] };
   let componentCurrents = new Map<string, number>();
   let componentNeutralCurrent = new Map<string, number>();
   let pinCurrentsLocal = new Map<string, number>();
@@ -58,87 +59,56 @@ export function runSimulation(project: Project): SimulationResult {
     const elements: MnaElement[] = [];
 
     // === Источники ===
-    let peNetIndex = -1;  // PE-узел создаётся только если есть подключённый источник
+    let peNetIndex = -1;
 
-    for (const s of project.components) {
-      if (s.deviceId === 'supply') {
-        const nL = getNet(s.id, 'L'), nN = getNet(s.id, 'N');
-        if (!nL || !nN || nL === nN) continue;
-        elements.push({ type: 'voltageSource', nodeA: netIndex.get(nL)!, nodeB: netIndex.get(nN)!, rms: 220, phaseDeg: 0, freq: 50, tag: s.id });
-        if (peNetIndex < 0) {
-          peNetIndex = nets.length;
-          elements.push({ type: 'resistor', nodeA: peNetIndex, nodeB: netIndex.get(nN)!, R: 0.001, tag: '__pe__' } as MnaElement);
+    // источники первыми, чтобы PE был известен до расчёта утечек
+    const ordered = [...project.components].sort((x, y) =>
+      Number(!!registry.get(y.deviceId)?.isSource) - Number(!!registry.get(x.deviceId)?.isSource));
+
+    for (const comp of ordered) {
+      const mod = registry.get(comp.deviceId);
+      if (!mod) { if (iter === 0) debugLogs.push('Нет мода: ' + comp.deviceId); continue; }
+
+      const nodeOf = (pinId: string): number | null => {
+        const n = getNet(comp.id, pinId);
+        return n ? netIndex.get(n)! : null;
+      };
+      let els = mod.stamp({ comp: { id: comp.id, params: comp.params }, node: nodeOf, supplyVoltage: 220 });
+
+      if (mod.isSource) {
+        const valid: MnaElement[] = [];
+        for (const e of els) {
+          if (e.type === 'voltageSource' && e.nodeA === e.nodeB) {
+            events.push({ type: 'short-circuit', message: 'Замкнуты выводы источника', target: { compId: comp.id } });
+            continue;
+          }
+          valid.push(e);
         }
-      }
-      if (s.deviceId === 'supply_3ph') {
-        const nN = getNet(s.id, 'N');
-        if (!nN) continue;
-        const phases: [string, number][] = [['L1', 0], ['L2', -120], ['L3', 120]];
-        let anyConnected = false;
-        for (const [ph, deg] of phases) {
-          const nPh = getNet(s.id, ph);
-          if (nPh && nPh !== nN) {
-            elements.push({ type: 'voltageSource', nodeA: netIndex.get(nPh)!, nodeB: netIndex.get(nN)!, rms: 220, phaseDeg: deg, freq: 50, tag: s.id + ':' + ph });
-            anyConnected = true;
+        els = valid;
+        if (els.length > 0 && mod.neutralPin) {
+          const n = nodeOf(mod.neutralPin);
+          if (n !== null) {
+            if (peNetIndex < 0) peNetIndex = nets.length;
+            elements.push({ type: 'resistor', nodeA: peNetIndex, nodeB: n, R: 0.001, tag: '__pe__' });
           }
         }
-        if (anyConnected && peNetIndex < 0) {
-          peNetIndex = nets.length;
-          elements.push({ type: 'resistor', nodeA: peNetIndex, nodeB: netIndex.get(nN)!, R: 0.001, tag: '__pe__' } as MnaElement);
-        }
       }
-      if (s.deviceId === 'supply_3ph_delta') {
-        const nL1 = getNet(s.id, 'L1');
-        const nL2 = getNet(s.id, 'L2');
-        const nL3 = getNet(s.id, 'L3');
-        if (nL1 && nL2 && nL3) {
-          elements.push({ type: 'voltageSource', nodeA: netIndex.get(nL1)!, nodeB: netIndex.get(nL2)!, rms: 380, phaseDeg: 0, freq: 50, tag: s.id + ':12' });
-          elements.push({ type: 'voltageSource', nodeA: netIndex.get(nL2)!, nodeB: netIndex.get(nL3)!, rms: 380, phaseDeg: -120, freq: 50, tag: s.id + ':23' });
-        }
-      }
-      if (s.deviceId === 'supply_us_2ph') {
-        const nN = getNet(s.id, 'N');
-        const nL1 = getNet(s.id, 'L1');
-        const nL2 = getNet(s.id, 'L2');
-        if (nL1 && nN && nL1 !== nN) elements.push({ type: 'voltageSource', nodeA: netIndex.get(nL1)!, nodeB: netIndex.get(nN)!, rms: 120, phaseDeg: 0, freq: 60, tag: s.id + ':L1' });
-        if (nL2 && nN && nL2 !== nN) elements.push({ type: 'voltageSource', nodeA: netIndex.get(nL2)!, nodeB: netIndex.get(nN)!, rms: 120, phaseDeg: 180, freq: 60, tag: s.id + ':L2' });
-        if ((nL1 || nL2) && nN && peNetIndex < 0) {
-          peNetIndex = nets.length;
-          elements.push({ type: 'resistor', nodeA: peNetIndex, nodeB: netIndex.get(nN)!, R: 0.001, tag: '__pe__' } as MnaElement);
-        }
-      }
-    }
 
-    // === Компоненты через моды ===
-    for (const comp of project.components) {
-      if (['supply', 'supply_3ph', 'supply_3ph_delta', 'supply_us_2ph'].includes(comp.deviceId)) continue;
-      const mod = registry.get(comp.deviceId);
-      if (!mod) continue;
-      const els = mod.stamp({
-        comp: { id: comp.id, params: comp.params },
-        node: (pinId: string) => {
-          const n = getNet(comp.id, pinId);
-          return n ? netIndex.get(n)! : null;
-        },
-        supplyVoltage: 220,
-      });
-      els.forEach(e => elements.push({ ...e, tag: comp.id } as MnaElement));
+      els.forEach(e => elements.push({ ...e, tag: e.tag ? comp.id + ':' + e.tag : comp.id } as MnaElement));
 
       // Утечка на PE
       const leakageMA = Number(comp.params.leakage) || 0;
       const isGrounded = comp.params.grounded !== false;
       if (leakageMA > 0 && isGrounded && peNetIndex >= 0) {
-        const phasePinCandidates = ['L', 'L1', 'V+'];
         let phaseNetId: string | null = null;
-        for (const pp of phasePinCandidates) {
+        for (const pp of ['L', 'L1', 'V+']) {
           if (comp.pins[pp]) {
             const n = getNet(comp.id, pp);
-            if (n && netIndex.get(n)! !== peNetIndex) { phaseNetId = n; break; }
+            if (n) { phaseNetId = n; break; }
           }
         }
         if (phaseNetId) {
-          const uNom = 220;
-          const R_leak = uNom / (leakageMA / 1000);
+          const R_leak = 220 / (leakageMA / 1000);
           elements.push({ type: 'resistor', nodeA: netIndex.get(phaseNetId)!, nodeB: peNetIndex, R: R_leak, tag: comp.id + ':leak' } as MnaElement);
         }
       }
@@ -315,7 +285,8 @@ export function runSimulation(project: Project): SimulationResult {
     wireLosses.set(wire.id, { current, dv, pLoss, R, material, crossSection, length });
   }
 
-  const uniqueEvents = Array.from(new Map(events.map(e => [e.message, e])).values());
+  const __evKey = (e: any) => [e.type, e.message, e.target?.compId, e.target?.wireId].join('|');
+  const uniqueEvents = Array.from(new Map(events.map(e => [__evKey(e), e])).values());
 
   return {
     netVRe, netVIm, pinVRe, pinVIm, pinNet: pinToNet, netIsland,

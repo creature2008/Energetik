@@ -55,6 +55,8 @@ export interface DeviceMod {
   icon?: string;
   pins: PinDef[];
   params: ParamDef[];
+  isSource?: boolean;
+  neutralPin?: string;
   stamp(ctx: StampCtx): MnaElement[];
   evaluate?(ctx: EvalCtx): EvalResult;
 }
